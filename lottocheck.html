@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Syndicate Lotto Checker</title>
+<style>
+  body{font-family:system-ui, sans-serif; margin:20px;}
+  h1{font-size:20px;}
+  .controls{margin:12px 0;}
+  .ticket-grid{border-collapse:collapse;width:100%;margin-top:10px;}
+  .ticket-grid th,.ticket-grid td{border:1px solid #ccc;padding:6px;text-align:center;}
+  .num{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:1px solid #ddd;
+    margin:2px;
+    font-weight:600;
+  }
+  .matchMain{background:#ffeb3b}
+  .matchBonus{background:#f44336;color:#fff}
+  .drawnum{background:#1976d2;color:#fff;font-weight:bold}
+  .bonus{background:#d32f2f;color:#fff;font-weight:bold}
+  .small{font-size:12px;color:#555}
+  #summary{margin:15px 0;font-weight:bold}
+  #summaryTable{border-collapse:collapse;margin-bottom:15px;}
+  #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
+  #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
+  #winningDisplay{display:flex;justify-content:center;margin:20px 0;}
+</style>
+</head>
+<body>
+<h1>Syndicate Lotto Checker</h1>
+<p class="small">This page reads tickets from the query string (<code>?tickets=...</code>). Share the URL with your group. If the URL also includes <code>&draw=</code> and <code>&bonus=</code> then the winning numbers are shown automatically.</p>
+
+<div class="controls" id="manualEntry">
+  <label>Winning numbers: 
+    <input id="drawInput" placeholder="e.g. 01 09 18 27 38 42">
+  </label>
+  <label>Bonus: <input id="bonusInput" placeholder="e.g. 11" size="3"></label>
+  <button id="applyDraw" type="button">Check</button>
+</div>
+
+<div id="winningDisplay"></div>
+<div id="summary"></div>
+<table id="summaryTable"></table>
+<div id="totalWinnings"></div>
+
+<table class="ticket-grid" id="ticketTable">
+  <thead>
+    <tr><th>Ticket</th><th>Draw Date</th><th>Line</th><th>Numbers</th><th>Matches</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+// ---- CONFIG ----
+const ANCHOR = { F: 3088, dateUTC: "2025-07-26" };
+
+// Default UK Lotto prize table
+let prizeTable = {
+  2: {label: "2 matches", prize: "Free Ticket", value: 0},
+  3: {label: "3 matches", prize: "£30", value: 30},
+  4: {label: "4 matches", prize: "£140", value: 140},
+  5: {label: "5 matches", prize: "£1,750", value: 1750},
+  "5+Bonus": {label: "5 + Bonus", prize: "£1,000,000", value: 1000000},
+  6: {label: "6 matches", prize: "Jackpot!", value: null}
+};
+
+function parseIsoDateUTC(s){
+  const [y,m,d]=s.split("-").map(Number);
+  return new Date(Date.UTC(y,m-1,d));
+}
+
+function fToDateUTC(F){
+  const anchorDate=parseIsoDateUTC(ANCHOR.dateUTC);
+  const n=F-ANCHOR.F;
+  let days=7*Math.trunc(n/2);
+  if(n>0 && n%2!==0) days+=4;
+  if(n<0 && n%2!==0) days-=3;
+  const out=new Date(anchorDate);
+  out.setUTCDate(out.getUTCDate()+days);
+  return out;
+}
+
+function expandDrawDates(F,weeks,dayCode){
+  const dates=[];
+  if(dayCode===6||dayCode===3){
+    for(let k=0;k<weeks;k++){ dates.push(fToDateUTC(F+2*k)); }
+  }
+  return dates;
+}
+
+function parseTickets(str){
+  if(!str) return [];
+  return str.split(";").filter(Boolean).map((t,idx)=>{
+    const [fStr,dStr,nums]=t.split("-");
+    const F=parseInt(fStr.replace("F",""),10);
+    const dayCode=parseInt(dStr.replace("D",""),10);
+    const lines=[];
+    for(let i=0;i+12<=nums.length;i+=12){
+      const row=[];
+      for(let j=0;j<12;j+=2){
+        row.push(parseInt(nums.slice(i+j,i+j+2),10));
+      }
+      lines.push(row);
+    }
+    const dates=expandDrawDates(F,1,dayCode);
+    return {id:idx+1,F,dayCode,dates,lines};
+  });
+}
+
+let tickets = [];
+
+function renderTickets(tickets){
+  const tbody=document.querySelector("#ticketTable tbody");
+  tbody.innerHTML="";
+  tickets.forEach(t=>{
+    t.dates.forEach(date=>{
+      t.lines.forEach((line,i)=>{
+        const tr=document.createElement("tr");
+        tr.dataset.ticketId=t.id;
+        tr.dataset.lineIndex=i;
+        tr.innerHTML=`<td>${t.id}</td>
+          <td>${date.toISOString().slice(0,10)}</td>
+          <td>${i+1}</td>
+          <td class="nums"></td>
+          <td class="matches">-</td>`;
+        const numsTd=tr.querySelector(".nums");
+        line.forEach(n=>{
+          const span=document.createElement("span");
+          span.className="num";
+          span.textContent=String(n).padStart(2,"0");
+          numsTd.appendChild(span);
+        });
+        tbody.appendChild(tr);
+      });
+    });
+  });
+}
+
+function applyDraw(nums, bonus=null){
+  const rows=Array.from(document.querySelectorAll("#ticketTable tbody tr"));
+  const results=[];
+  rows.forEach(row=>{
+    const numSpans=row.querySelectorAll(".num");
+    let count=0;
+    let hasBonus=false;
+    numSpans.forEach(s=>{
+      const val=parseInt(s.textContent,10);
+      if(nums.includes(val)){
+        s.classList.add("matchMain"); count++;
+      } else if(bonus!==null && val===bonus){
+        hasBonus=true; s.classList.add("matchBonus");
+      } else {
+        s.classList.remove("matchMain","matchBonus");
+      }
+    });
+    let category = count;
+    if(count===5 && hasBonus) category="5+Bonus";
+    row.querySelector(".matches").textContent=category;
+    results.push({row,count,hasBonus,category});
+  });
+
+  // Sort rows by matches (descending)
+  results.sort((a,b)=>{
+    const order = v => v==="5+Bonus" ? 5.5 : v;
+    return order(b.category)-order(a.category);
+  });
+
+  const tbody=document.querySelector("#ticketTable tbody");
+  tbody.innerHTML="";
+  results.forEach(r=>tbody.appendChild(r.row));
+
+  // Summary counts
+  const summaryCounts={};
+  results.forEach(r=>{
+    if((typeof r.category==="number" && r.category>=2) || r.category==="5+Bonus"){
+      summaryCounts[r.category]=(summaryCounts[r.category]||0)+1;
+    }
+  });
+
+  const summaryDiv=document.getElementById("summary");
+  const summaryTable=document.getElementById("summaryTable");
+  const totalDiv=document.getElementById("totalWinnings");
+  summaryTable.innerHTML="";
+  totalDiv.textContent="";
+
+  if(Object.keys(summaryCounts).length===0){
+    summaryDiv.textContent="No winning lines (2+ matches).";
+  }else{
+    summaryDiv.textContent="Winning lines summary:";
+    const thead=document.createElement("thead");
+    thead.innerHTML="<tr><th>Category</th><th>Line count</th><th>Prize</th><th>Total value</th></tr>";
+    const tb=document.createElement("tbody");
+    let cashTotal=0, freeTickets=0;
+    Object.entries(summaryCounts).sort((a,b)=>{
+      const order = x => x==="5+Bonus" ? 5.5 : parseInt(x,10);
+      return order(b[0])-order(a[0]);
+    }).forEach(([category,count])=>{
+      const prizeInfo=prizeTable[category];
+      let prizeLabel="-", totalVal="-";
+      if(prizeInfo){
+        prizeLabel=prizeInfo.prize;
+        if(prizeInfo.value!==null){
+          if(prizeInfo.value>0){
+            const val=prizeInfo.value*count;
+            totalVal="£"+val.toLocaleString();
+            cashTotal+=val;
+          } else if(category==2){
+            freeTickets+=count;
+          }
+        }
+      }
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${category}</td><td>${count}</td><td>${prizeLabel}</td><td>${totalVal}</td>`;
+      tb.appendChild(tr);
+    });
+    summaryTable.appendChild(thead);
+    summaryTable.appendChild(tb);
+
+    let totalText="Total winnings: ";
+    if(cashTotal>0) totalText+="£"+cashTotal.toLocaleString();
+    if(freeTickets>0) totalText+=(cashTotal>0?" and ":"")+freeTickets+" Free Ticket(s)";
+    if(cashTotal===0 && freeTickets===0) totalText+="None";
+    totalDiv.textContent=totalText;
+  }
+}
+
+// ---- Run ----
+const params=new URLSearchParams(location.search);
+tickets=parseTickets(params.get("tickets"));
+renderTickets(tickets);
+
+const drawNumsParam=params.get("draw");
+const bonusParam=params.get("bonus");
+const jackpotParam=params.get("jackpot");
+const prizesParam=params.get("prizes");
+
+// Override prizeTable if &prizes is provided
+if(prizesParam){
+  prizeTable={};
+  prizesParam.split(";").forEach(entry=>{
+    const [cat, rest] = entry.split(":");
+    if(!rest) return;
+    const [prizeLabel, val] = rest.split("=");
+    prizeTable[cat] = {
+      label: cat,
+      prize: prizeLabel,
+      value: val==="null" ? null : parseInt(val,10)
+    };
+  });
+} else if(jackpotParam){
+  // Only override jackpot if provided
+  prizeTable[6] = {label: "6 matches", prize: "£"+parseInt(jackpotParam,10).toLocaleString()+" (est)", value: parseInt(jackpotParam,10)};
+}
+
+let winningNums=[], bonusBall=null;
+if(drawNumsParam){
+  winningNums=drawNumsParam.split(/[ ,]+/).map(x=>parseInt(x,10));
+}
+if(bonusParam) bonusBall=parseInt(bonusParam,10);
+
+if(winningNums.length===6){
+  document.getElementById("manualEntry").style.display="none";
+  const disp=document.getElementById("winningDisplay");
+  disp.innerHTML="";
+  winningNums.forEach(n=>{
+    const span=document.createElement("span");
+    span.className="num drawnum";
+    span.textContent=String(n).padStart(2,"0");
+    disp.appendChild(span);
+  });
+  if(bonusBall!==null){
+    const span=document.createElement("span");
+    span.className="num bonus";
+    span.textContent=String(bonusBall).padStart(2,"0");
+    disp.appendChild(span);
+  }
+  applyDraw(winningNums, bonusBall);
+}
+
+document.getElementById("applyDraw").addEventListener("click",()=>{
+  const v=document.getElementById("drawInput").value.trim();
+  const arr=(v.match(/\d{1,2}/g)||[]).map(x=>parseInt(x,10));
+  const bonusVal=parseInt(document.getElementById("bonusInput").value,10)||null;
+  applyDraw(arr, bonusVal);
+});
+</script>
+</body>
+</html>
+
