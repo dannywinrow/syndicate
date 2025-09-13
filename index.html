@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lotto Syndicate Admin</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:20px;}
+  h1{font-size:22px;margin-bottom:10px;}
+  #reader{width:320px;margin:auto;}
+  table{border-collapse:collapse;margin-top:15px;width:100%;}
+  th,td{border:1px solid #ccc;padding:6px;text-align:left;}
+  .controls{margin-top:15px;}
+  input,button{padding:6px 10px;margin:4px;}
+  #outputLink{margin-top:15px;word-break:break-all;font-weight:bold;}
+</style>
+</head>
+<body>
+<h1>Lotto Syndicate – Admin Page</h1>
+
+<p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below.
+Then add winning numbers / bonus (optional) and generate a shareable link for your group.</p>
+
+<div id="reader"></div>
+
+<p>Or upload an image of a QR code:</p>
+<input type="file" id="fileInput" accept="image/*">
+
+<h3>Scanned Tickets</h3>
+<table id="ticketTable">
+  <thead><tr><th>#</th><th>Raw QR</th><th>Compact Format</th><th>Remove</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<div class="controls">
+  <label>Winning numbers (6, optional): <input id="drawInput" placeholder="01 09 18 27 38 42"></label>
+  <label>Bonus: <input id="bonusInput" size="3" placeholder="11"></label><br>
+  <label>Jackpot (£, optional): <input id="jackpotInput" placeholder="7500000"></label><br>
+  <label>Custom Prizes (advanced, optional): <input id="prizesInput" size="80"
+   placeholder="2:Free Ticket+£5=5;3:£30=30;..."></label><br>
+  <button id="generate" type="button">Generate Shareable Link</button>
+</div>
+
+<div id="outputLink"></div>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script>
+let tickets = JSON.parse(localStorage.getItem('adminTickets')||'[]');
+const html5QrCode = new Html5Qrcode('reader');
+
+function persist(){ localStorage.setItem('adminTickets', JSON.stringify(tickets)); }
+
+function addTicket(raw){
+  // Robust parse to compact format: Fxxxx-Dx-<numbers>
+  let compact = raw;
+  try{
+    const f = (raw.match(/F(\d+)/)||[])[1];
+    const d = (raw.match(/D(\d+)/)||[])[1];
+    const s = (raw.match(/S(\d+)/)||[])[1];
+    if(f && d && s){ compact = `F${f}-D${d}-${s}`; }
+  }catch(e){ console.warn('Could not parse', raw); }
+  tickets.push({raw, compact});
+  persist();
+  renderTickets();
+}
+
+function renderTickets(){
+  const tb=document.querySelector('#ticketTable tbody');
+  tb.innerHTML='';
+  tickets.forEach((t,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${i+1}</td>
+      <td>${t.raw}</td>
+      <td>${t.compact}</td>
+      <td><button type="button" onclick="removeTicket(${i})">Remove</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function removeTicket(i){
+  tickets.splice(i,1);
+  persist();
+  renderTickets();
+}
+
+// Generate link pointing to index.html in same folder
+document.getElementById('generate').addEventListener('click',()=>{
+  if(!tickets.length){ alert('Scan some tickets first!'); return; }
+  const params=new URLSearchParams();
+  params.set('tickets', tickets.map(t=>t.compact).join(';'));
+
+  const draw=document.getElementById('drawInput').value.trim();
+  if(draw) params.set('draw', draw);
+  const bonus=document.getElementById('bonusInput').value.trim();
+  if(bonus) params.set('bonus', bonus);
+  const jackpot=document.getElementById('jackpotInput').value.trim();
+  if(jackpot) params.set('jackpot', jackpot);
+  const prizes=document.getElementById('prizesInput').value.trim();
+  if(prizes) params.set('prizes', prizes);
+
+  const base = location.origin + location.pathname.replace(/admin\.html$/, '');
+  const url = base + (base.endsWith('/') ? '' : '/') + 'index.html' + '?' + params.toString();
+  document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a>`;
+});
+
+// --- QR Scanner ---
+function onScanSuccess(decodedText){
+  if(tickets.find(t=>t.raw===decodedText)) return; // avoid dupes
+  addTicket(decodedText);
+}
+
+Html5Qrcode.getCameras().then(devices => {
+  if(devices && devices.length) {
+    html5QrCode.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScanSuccess);
+  }
+}).catch(err=>console.error(err));
+
+// --- File upload fallback ---
+document.getElementById('fileInput').addEventListener('change', e => {
+  if (e.target.files.length === 0) return;
+  const file = e.target.files[0];
+  html5QrCode.scanFile(file, true)
+    .then(decodedText => { if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); })
+    .catch(err => alert('QR scan failed: ' + err));
+});
+
+// initial render
+renderTickets();
+</script>
+</body>
+</html>
