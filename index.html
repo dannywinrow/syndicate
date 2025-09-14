@@ -171,7 +171,7 @@ document.getElementById('generate').addEventListener('click',()=>{
   const compact=encodeCompactTickets(allLines);
   params.set('t',compact);
   const base = location.origin + location.pathname.replace(/admin\.html$/, '');
-  const url = base + (base.endsWith('/') ? '' : '/') + 'index.html' + '?' + params.toString();
+  const url = base + (base.endsWith('/') ? '' : '/') + 'viewer.html' + '?' + params.toString();
   document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
 });
 
