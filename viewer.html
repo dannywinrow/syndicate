@@ -28,7 +28,7 @@
     transform: rotate(180deg);
     font-size:10px;
     color:#666;
-    width:12px;
+    width:16px;
   }
   #winningDisplay{display:flex;justify-content:center;margin:20px 0;flex-wrap:wrap;}
   #summary{margin:15px 0;font-weight:bold}
@@ -45,7 +45,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.0 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.2 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -128,6 +128,14 @@ function parseCustomPrizes(p){
   return out;
 }
 
+// --- Label helper ---
+function lineLabel(ticketId, lineNo, totalTickets){
+  const letters=["A","B","C","D","E","F","G"];
+  const linePart=(lineNo<=7 ? letters[lineNo-1] : String(lineNo));
+  if(totalTickets===1) return linePart;
+  return `${ticketId}:${linePart}`;
+}
+
 // --- Main rendering logic ---
 function renderResults(tickets,mainNums,bonus){
   const tbody=document.querySelector("#ticketTable tbody");
@@ -161,7 +169,7 @@ function renderResults(tickets,mainNums,bonus){
     // Line number cell
     const tdLine=document.createElement("td");
     tdLine.className="lineNo";
-    tdLine.textContent=r.lineNo;
+    tdLine.textContent=lineLabel(r.ticketId, r.lineNo, tickets.length);
     tr.appendChild(tdLine);
 
     // Numbers cell
