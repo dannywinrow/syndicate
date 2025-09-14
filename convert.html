@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Lotto Link Converter</title>
+<title>Lotto Link Converter (to JSON)</title>
 <style>
   body{font-family:system-ui,sans-serif;margin:20px;}
   textarea{width:100%;height:100px;}
-  button{margin:10px 0;padding:8px 12px;}
+  button{margin:10px 5px;padding:8px 12px;}
   #output{margin-top:15px;font-weight:bold;word-break:break-all;}
 </style>
 </head>
 <body>
-<h1>Lotto Link Converter</h1>
-<p>Paste your old link (full URL or just query string). It will be converted to the new compact format (<code>?t=...&draw=...</code>).</p>
+<h1>Lotto Link Converter → Rich JSON</h1>
+<p>Paste your old link (full URL or just query string). It will be converted to the new rich JSON format.</p>
 
 <textarea id="input"></textarea><br>
 <button id="convert">Convert</button>
@@ -22,99 +22,81 @@
 
 <script>
 // --- helpers ---
-function base64UrlEncode(bytes) {
-  let bin = "";
-  bytes.forEach(b => bin += String.fromCharCode(b));
-  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-}
-
-function encodeCompactTickets(lines) {
-  const bits = [];
-  function pushBits(val,n){
-    for(let i=n-1;i>=0;i--){
-      bits.push((val>>i)&1);
-    }
-  }
-  pushBits(lines.length,16);
-  lines.forEach(line => line.forEach(n => pushBits(n-1,6)));
-  const bytes = new Uint8Array(Math.ceil(bits.length/8));
-  bits.forEach((b,i) => {
-    bytes[Math.floor(i/8)] |= b << (7-(i%8));
-  });
-  return base64UrlEncode(bytes);
-}
-
 function parseLegacyTickets(str) {
-  const out = [];
-  if(!str) return out;
-  str.split(";").forEach(chunk => {
-    const nums = (chunk.split("-")[2] || "");
-    for(let i=0; i+12<=nums.length; i+=12) {
-      const row = [];
-      for(let j=0; j<12; j+=2) {
-        row.push(parseInt(nums.slice(i+j,i+j+2),10));
-      }
+  const out=[]; if(!str) return out;
+  str.split(";").forEach(chunk=>{
+    const nums=(chunk.split("-")[2]||"");
+    for(let i=0;i+12<=nums.length;i+=12){
+      const row=[]; for(let j=0;j<12;j+=2){ row.push(parseInt(nums.slice(i+j,i+j+2),10)); }
       if(row.length===6) out.push(row);
     }
   });
   return out;
 }
 
+// Epoch reference: F3102 = 2025-09-13 (Sat)
+const baseF=3102;
+const baseDate=new Date(Date.UTC(2025,8,13)); // Sept is month 8 (0-based)
+
+function fToDate(fnum){
+  const diff=fnum-baseF;
+  // each increment = 1 draw = 3 or 4 days depending on Wed/Sat
+  // Wed/Sat alternate every ~3 or 4 days. So just add diff*3.5 days and snap to Wed/Sat.
+  const days=diff*3.5; // approximate
+  const d=new Date(baseDate.getTime()+days*86400000);
+  // Snap to Wed (3) or Sat (6)
+  while(d.getUTCDay()!==3 && d.getUTCDay()!==6){
+    d.setUTCDate(d.getUTCDate()+1);
+  }
+  return d.toISOString().slice(0,10);
+}
+
 // --- convert ---
-document.getElementById("convert").addEventListener("click", () => {
+document.getElementById("convert").addEventListener("click",()=>{
   let input=document.getElementById("input").value.trim();
   if(!input) return;
-
-  // strip surrounding <> or quotes if pasted
   input=input.replace(/^<|>$/g,"").replace(/^\"|\"$/g,"");
-
-  // try to build URL
   let u;
-  try {
-    if(input.includes("http")) {
-      u=new URL(input);
-    } else if(input.startsWith("?")) {
-      u=new URL("http://dummy/"+input);
-    } else if(input.includes("=")) {
-      u=new URL("http://dummy/?"+input);
-    } else {
-      throw new Error("No query parameters found");
-    }
-  } catch(e) {
-    alert("Could not parse input: "+e.message);
-    return;
-  }
+  try{
+    if(input.includes("http")) u=new URL(input);
+    else if(input.startsWith("?")) u=new URL("http://dummy/"+input);
+    else if(input.includes("=")) u=new URL("http://dummy/?"+input);
+    else throw new Error("No query parameters found");
+  }catch(e){ alert("Could not parse input: "+e.message); return; }
 
   const params=new URLSearchParams(u.search);
-  const tickets=params.get("tickets");
-  const lines=parseLegacyTickets(tickets);
-  if(lines.length===0) {
-    alert("No legacy tickets found in link.");
-    return;
-  }
-  const compact=encodeCompactTickets(lines);
+  const lines=parseLegacyTickets(params.get("tickets"));
+  if(lines.length===0){ alert("No legacy tickets found in link."); return; }
 
-  let drawNums=[];
-  if(params.get("draw")) {
-    drawNums=params.get("draw").split(/[ ,]+/).map(x=>parseInt(x,10));
-  }
-  if(drawNums.length===6 && params.get("bonus")) {
-    drawNums.push(parseInt(params.get("bonus"),10));
+  // get F#
+  const fstr=(params.get("tickets")||"").match(/F(\d+)/);
+  let drawDate=null;
+  if(fstr){
+    const fnum=parseInt(fstr[1],10);
+    drawDate=fToDate(fnum);
   }
 
-  const newParams=new URLSearchParams();
-  newParams.set("t",compact);
-  if(drawNums.length===7) newParams.set("draw",drawNums.join(","));
-  if(params.get("p")) newParams.set("p",params.get("p"));
-  if(params.get("jackpot") && !newParams.has("p")) {
-    newParams.set("p","6:"+params.get("jackpot"));
+  const ticket={id:1, drawDates: drawDate?[drawDate]:[], lines};
+
+  const results=[];
+  if(params.get("draw")){
+    const arr=params.get("draw").split(/[ ,]+/).map(x=>parseInt(x,10));
+    if(arr.length===6 && params.get("bonus")) arr.push(parseInt(params.get("bonus"),10));
+    if(arr.length===7){
+      results.push({date: drawDate||"unknown", draw: arr, prizes: params.get("p")||("6:"+(params.get("jackpot")||""))});
+    }
   }
 
-  // base for new link (replace convert.html with index.html if present)
-  const base=(input.includes("http") ? u.origin+u.pathname.replace(/convert\\.html$/,"index.html") : "index.html");
-  const newUrl=base+"?"+newParams.toString();
+  const data={tickets:[ticket]};
+  if(results.length) data.results=results;
 
-  document.getElementById("output").innerHTML="New link:<br><a href=\""+newUrl+"\" target=\"_blank\">"+newUrl+"</a>";
+  const json=JSON.stringify(data,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='lotto-converted.json'; a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById("output").textContent="Exported "+lines.length+" lines to lotto-converted.json";
 });
 </script>
 </body>

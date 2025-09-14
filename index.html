@@ -19,7 +19,7 @@
 <body>
 <h1>Lotto Syndicate – Admin Page</h1>
 
-<p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below. Then add winning numbers (7 numbers including bonus) and optional prizes. Generate a shareable link for your group.</p>
+<p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below. Then add winning numbers (7 numbers including bonus) and optional prizes. You can still generate a shareable URL, or export to JSON.</p>
 
 <div id="reader"></div>
 <p>Or upload an image of a QR code:</p>
@@ -27,15 +27,17 @@
 
 <h3>Scanned Tickets</h3>
 <table id="ticketTable">
-  <thead><tr><th>#</th><th>Raw QR</th><th>Compact Format</th><th>Remove</th></tr></thead>
+  <thead><tr><th>#</th><th>Raw QR</th><th>Lines</th><th>Draw Dates</th><th>Remove</th></tr></thead>
   <tbody></tbody>
 </table>
 <div id="lineCount"></div>
 
 <div class="controls">
   <label>Winning numbers (7, last is bonus): <input id="drawInput" size="25" placeholder="01 09 18 27 38 42 11"></label><br>
+  <label>Result Date: <input type="date" id="resultDate"></label><br>
   <label>Prizes: 2=<input id="p2" size="4" placeholder="0"> 3=<input id="p3" size="4" placeholder="30"> 4=<input id="p4" size="4" placeholder="140"> 5=<input id="p5" size="6" placeholder="1750"> 5b=<input id="p5b" size="8" placeholder="1000000"> 6=<input id="p6" size="8" placeholder="7500000"></label><br>
   <button id="generate" type="button">Generate Shareable Link</button>
+  <button id="exportJson" type="button">Export JSON</button>
   <button id="clear" type="button">Clear All</button>
 </div>
 
@@ -43,145 +45,134 @@
 
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script>
-let tickets = JSON.parse(localStorage.getItem('adminTickets')||'[]');
+// --- storage ---
+let tickets = [];
 const html5QrCode = new Html5Qrcode('reader');
 
-function persist(){ localStorage.setItem('adminTickets', JSON.stringify(tickets)); }
+// --- helpers: draw date calculation ---
+const baseF=3102;
+const baseDate=new Date(Date.UTC(2025,8,13)); // 2025-09-13 Sat
+function fToDate(fnum){
+  const diff=fnum-baseF;
+  const days=diff*3.5;
+  const d=new Date(baseDate.getTime()+days*86400000);
+  while(d.getUTCDay()!==3 && d.getUTCDay()!==6){
+    d.setUTCDate(d.getUTCDate()+1);
+  }
+  return d.toISOString().slice(0,10);
+}
 
+// --- ticket handling ---
 function countLines(){
   let total=0;
-  tickets.forEach(t=>{
-    const m=t.compact.match(/S(\d+)/);
-    if(m){ total+=m[1].length/12; }
-  });
+  tickets.forEach(t=> total+=t.lines.length);
   document.getElementById('lineCount').textContent = 'Total lines scanned: '+total;
 }
-
 function addTicket(raw){
   if(!raw || raw==='0') return;
-  let compact = raw;
-  try{
-    const f = (raw.match(/F(\d+)/)||[])[1];
-    const d = (raw.match(/D(\d+)/)||[])[1];
-    const s = (raw.match(/S(\d+)/)||[])[1];
-    if(f && d && s && s.length%12===0){
-      compact = `F${f}-D${d}-${s}`;
-    } else return;
-  }catch(e){ return; }
-  tickets.push({raw, compact});
-  persist();
+  const mF=raw.match(/F(\\d+)/);
+  const mS=raw.match(/S(\\d+)/);
+  if(!mF || !mS) return;
+  const fnum=parseInt(mF[1],10);
+  const s=mS[1];
+  const lines=[];
+  for(let i=0;i+12<=s.length;i+=12){
+    const row=[];
+    for(let j=0;j<12;j+=2){
+      row.push(parseInt(s.slice(i+j,i+j+2),10));
+    }
+    if(row.length===6) lines.push(row);
+  }
+  const drawDates=[fToDate(fnum)];
+  tickets.push({id:tickets.length+1, raw, lines, drawDates});
   renderTickets();
+  document.getElementById('resultDate').value = drawDates[0];
 }
-
 function renderTickets(){
   const tb=document.querySelector('#ticketTable tbody');
   tb.innerHTML='';
   tickets.forEach((t,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${i+1}</td><td>${t.raw}</td><td>${t.compact}</td><td><button type="button" onclick="removeTicket(${i})">Remove</button></td>`;
+    tr.innerHTML=`<td>${i+1}</td><td>${t.raw}</td><td>${t.lines.length}</td><td>${t.drawDates.join(',')}</td><td><button onclick="removeTicket(${i})">Remove</button></td>`;
     tb.appendChild(tr);
   });
   countLines();
 }
-
 function removeTicket(i){
   tickets.splice(i,1);
-  persist();
   renderTickets();
 }
-
 document.getElementById('clear').addEventListener('click',()=>{
-  tickets=[]; persist(); renderTickets();
+  tickets=[]; renderTickets(); document.getElementById('resultDate').value='';
 });
 
+// --- compact encoder (for URL generation) ---
 function base64UrlEncode(bytes){
-  let bin="";
-  bytes.forEach(b=> bin+=String.fromCharCode(b));
-  let str=btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  return str;
+  let bin=''; bytes.forEach(b=> bin+=String.fromCharCode(b));
+  return btoa(bin).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 }
-
-function encodeCompactTickets(){
-  let lines=[];
-  tickets.forEach(t=>{
-    const m=t.compact.match(/S(\d+)/);
-    if(m){
-      const s=m[1];
-      for(let i=0;i+12<=s.length;i+=12){
-        const arr=[];
-        for(let j=0;j<12;j+=2){
-          arr.push(parseInt(s.slice(i+j,i+j+2),10));
-        }
-        lines.push(arr);
-      }
-    }
-  });
-  const lineCount=lines.length;
-  const bits=[];
-  function pushBits(val,n){
-    for(let i=n-1;i>=0;i--) bits.push((val>>i)&1);
-  }
-  pushBits(lineCount,16);
+function encodeCompactTickets(lines){
+  const bits=[]; function pushBits(val,n){for(let i=n-1;i>=0;i--) bits.push((val>>i)&1);}
+  pushBits(lines.length,16);
   lines.forEach(line=> line.forEach(n=> pushBits(n-1,6)));
   const bytes=new Uint8Array(Math.ceil(bits.length/8));
-  bits.forEach((b,i)=>{ bytes[Math.floor(i/8)]|=b<<(7-(i%8)); });
+  bits.forEach((b,i)=>{bytes[Math.floor(i/8)]|=b<<(7-(i%8));});
   return base64UrlEncode(bytes);
 }
+function collectAllLines(){
+  let allLines=[]; tickets.forEach(t=> allLines.push(...t.lines)); return allLines;
+}
 
+// --- URL generate ---
 document.getElementById('generate').addEventListener('click',()=>{
-  if(!tickets.length){ alert('Scan some tickets first!'); return; }
+  const allLines=collectAllLines();
+  if(allLines.length===0){ alert('Scan some tickets first!'); return; }
   const params=new URLSearchParams();
-
-  // Draw numbers (7, last is bonus)
   const draw=document.getElementById('drawInput').value.trim();
   if(draw) params.set('draw',draw);
-
-  // Prizes
-  const prizeStr=[];
-  const map={p2:'2',p3:'3',p4:'4',p5:'5',p5b:'5b',p6:'6'};
-  for(const id in map){
-    const v=document.getElementById(id).value.trim();
-    if(v) prizeStr.push(map[id]+":"+v);
-  }
+  const prizeStr=[]; const map={p2:'2',p3:'3',p4:'4',p5:'5',p5b:'5b',p6:'6'};
+  for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+':'+v);}
   if(prizeStr.length) params.set('p',prizeStr.join(';'));
-
-  // Compact encoding
-  const compact=encodeCompactTickets();
+  const compact=encodeCompactTickets(allLines);
   params.set('t',compact);
-
-  const base = location.origin + location.pathname.replace(/admin\.html$/, '');
+  const base = location.origin + location.pathname.replace(/admin\\.html$/, '');
   const url = base + (base.endsWith('/') ? '' : '/') + 'index.html' + '?' + params.toString();
-  document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a>`;
+  document.getElementById('outputLink').innerHTML = `Share this link:<br><a href=\"${url}\" target=\"_blank\">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
+});
+
+// --- JSON export ---
+document.getElementById('exportJson').addEventListener('click',()=>{
+  if(tickets.length===0){alert('No tickets to export');return;}
+  const data={tickets};
+  const drawStr=document.getElementById('drawInput').value.trim();
+  if(drawStr){
+    const arr=drawStr.split(/[ ,]+/).map(x=>parseInt(x,10));
+    if(arr.length===7){
+      const dateVal=document.getElementById('resultDate').value||'unknown';
+      const prizeStr=[]; const map={p2:'2',p3:'3',p4:'4',p5:'5',p5b:'5b',p6:'6'};
+      for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+':'+v);}
+      data.results=[{date:dateVal, draw:arr, prizes:prizeStr.join(';')}];
+    }
+  }
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='lotto-tickets.json'; a.click();
+  URL.revokeObjectURL(url);
 });
 
 // --- QR Scanner ---
-function onScanSuccess(decodedText){
-  if(tickets.find(t=>t.raw===decodedText)) return;
-  addTicket(decodedText);
-}
-
+function onScanSuccess(decodedText){ if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); }
 Html5Qrcode.getCameras().then(devices => {
   if(devices && devices.length) {
     html5QrCode.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScanSuccess);
   }
 }).catch(err=>console.error(err));
-
-// --- File upload fallback ---
 document.getElementById('fileInput').addEventListener('change', e => {
   if (e.target.files.length === 0) return;
   const file = e.target.files[0];
-  html5QrCode.scanFile(file, true)
-    .then(decodedText => { if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); })
+  html5QrCode.scanFile(file, true).then(decodedText => { if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); })
     .catch(err => alert('QR scan failed: ' + err));
 });
-
-// preload from query
-const params=new URLSearchParams(location.search);
-if(params.get('tickets')){
-  params.get('tickets').split(';').forEach(raw=> addTicket(raw));
-}
-
-renderTickets();
 </script>
 </body>
 </html>
