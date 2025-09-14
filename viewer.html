@@ -20,18 +20,24 @@
   }
   .matchMain{background:#ffeb3b}
   .matchBonus{background:#f44336;color:#fff}
+  .matchBonusDim{background:rgba(244,67,54,0.25);color:#000}
   .drawnum{background:#1976d2;color:#fff;font-weight:bold}
   .bonus{background:#d32f2f;color:#fff;font-weight:bold}
-  #winningDisplay{display:flex;justify-content:center;margin:20px 0;}
+  #winningDisplay{display:flex;justify-content:center;margin:20px 0;flex-wrap:wrap;}
   #summary{margin:15px 0;font-weight:bold}
-  #summaryTable{border-collapse:collapse;margin-bottom:15px;}
+  #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;}
   #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
   #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
+  @media(max-width:640px){
+    .num{width:28px;height:28px;line-height:28px;font-size:13px;margin:1px;}
+    td,th{font-size:13px;padding:4px}
+    h1{font-size:18px;}
+  }
 </style>
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.3.6 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.3.7 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -133,9 +139,7 @@ function renderResults(tickets,mainNums,bonus){
     });
   });
 
-  // strict category rank
   const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
-
   results.sort((a,b)=>{
     const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
     if(rb!==ra) return rb-ra;
@@ -151,7 +155,13 @@ function renderResults(tickets,mainNums,bonus){
       const s=document.createElement("span");
       s.className="num";
       if(mainNums.includes(n)) s.classList.add("matchMain");
-      if(n===bonus) s.classList.add("matchBonus");
+      if(n===bonus){
+        if(r.category==="5+Bonus"){
+          s.classList.add("matchBonus"); // strong only for 5+Bonus wins
+        } else {
+          s.classList.add("matchBonusDim"); // subtle tint otherwise
+        }
+      }
       s.textContent=String(n).padStart(2,"0");
       tdNums.appendChild(s);
     });
