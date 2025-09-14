@@ -8,36 +8,42 @@
   body{font-family:system-ui,sans-serif;margin:20px;}
   h1{font-size:22px;margin-bottom:4px;}
   #reader{width:320px;margin:auto;}
+  #lineCount{margin-top:10px;font-weight:bold;}
+  #lastTicketPreview{margin-top:10px;padding:8px;border:1px solid #ccc;border-radius:6px;background:#fafafa;font-size:13px;}
   table{border-collapse:collapse;margin-top:15px;width:100%;}
-  th,td{border:1px solid #ccc;padding:6px;text-align:left;}
+  th,td{border:1px solid #ccc;padding:6px;text-align:left;vertical-align:top;}
   .controls{margin-top:15px;}
   input,button{padding:6px 10px;margin:4px;}
   #outputLink{margin-top:15px;word-break:break-all;font-weight:bold;}
-  #lineCount{margin-top:10px;font-weight:bold;}
+  .num{display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:#eee;text-align:center;margin:2px;font-size:12px;}
+  details summary{cursor:pointer;font-weight:bold;}
 </style>
 </head>
 <body>
 <h1>Lotto Syndicate – Admin Page</h1>
-<p style="color:#666;font-size:12px;">Version 0.3.2 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.3.4 – 2025-09-14</p>
 
 <p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below. Then add winning numbers (7 numbers including bonus) and optional prizes. You can still generate a shareable URL, or export to JSON.</p>
 
 <div id="reader"></div>
+<div id="lineCount"></div>
+<div id="lastTicketPreview"></div>
+
 <p>Or upload an image of a QR code:</p>
 <input type="file" id="fileInput" accept="image/*">
 
 <h3>Scanned Tickets</h3>
 <table id="ticketTable">
-  <thead><tr><th>#</th><th>Raw QR</th><th>Lines</th><th>Draw Dates</th><th>Remove</th></tr></thead>
+  <thead><tr><th>#</th><th>Raw QR</th><th>Lines</th><th>Draw Dates</th><th>View</th><th>Remove</th></tr></thead>
   <tbody></tbody>
 </table>
-<div id="lineCount"></div>
 
 <div class="controls">
   <label>Winning numbers (7, last is bonus): <input id="drawInput" size="25" placeholder="01 09 18 27 38 42 11"></label><br>
   <label>Result Date: <input type="date" id="resultDate"></label><br>
   <label>Prizes: 2=<input id="p2" size="4" placeholder="0"> 3=<input id="p3" size="4" placeholder="30"> 4=<input id="p4" size="4" placeholder="140"> 5=<input id="p5" size="6" placeholder="1750"> 5b=<input id="p5b" size="8" placeholder="1000000"> 6=<input id="p6" size="8" placeholder="7500000"></label><br>
   <button id="generate" type="button">Generate Shareable Link</button>
+  <button id="shorten" type="button">Shorten via TinyURL</button>
   <button id="exportJson" type="button">Export JSON</button>
   <button id="clear" type="button">Clear All</button>
 </div>
@@ -70,28 +76,32 @@ function countLines(){
   document.getElementById('lineCount').textContent = 'Total lines scanned: '+total;
 }
 
+function renderLastTicketPreview(ticket){
+  if(!ticket){ document.getElementById('lastTicketPreview').innerHTML=''; return; }
+  let html=`<b>Last scanned ticket (${ticket.lines.length} line${ticket.lines.length!==1?'s':''}):</b><br>`;
+  ticket.lines.forEach(line=>{
+    html+=line.map(n=>`<span class="num">${String(n).padStart(2,'0')}</span>`).join('')+'<br>';
+  });
+  document.getElementById('lastTicketPreview').innerHTML=html;
+}
+
 function addTicket(raw){
   if(!raw || raw==='0') return;
-
-  // F = draw counter
   const mF = raw.match(/F(\d+)/);
   if(!mF) return;
   const fnum = parseInt(mF[1],10);
 
-  // Extract numbers
   let numStr = null;
   const mS = raw.match(/S(\d+)/);
   if(mS) {
     numStr = mS[1];
   } else {
-    // fallback: everything after the last "/" if numeric
     const parts = raw.split("/");
     const tail = parts[parts.length-1];
     if(/^[0-9]+$/.test(tail)) numStr = tail;
   }
   if(!numStr) return;
 
-  // Parse lines
   const lines=[];
   for(let i=0;i+12<=numStr.length;i+=12){
     const row=[];
@@ -102,8 +112,10 @@ function addTicket(raw){
   }
 
   const drawDates=[fToDate(fnum)];
-  tickets.push({id:tickets.length+1, raw, lines, drawDates});
+  const ticket={id:tickets.length+1, raw, lines, drawDates};
+  tickets.unshift(ticket); // newest first
   renderTickets();
+  renderLastTicketPreview(ticket);
   document.getElementById('resultDate').value = drawDates[0];
 }
 
@@ -112,20 +124,24 @@ function renderTickets(){
   tb.innerHTML='';
   tickets.forEach((t,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${i+1}</td><td>${t.raw}</td><td>${t.lines.length}</td><td>${t.drawDates.join(',')}</td><td><button onclick="removeTicket(${i})">Remove</button></td>`;
+    const linesHtml=t.lines.map(line=>line.map(n=>`<span class="num">${String(n).padStart(2,'0')}</span>`).join('')).join('<br>');
+    tr.innerHTML=`<td>${i+1}</td><td>${t.raw}</td><td>${t.lines.length}</td><td>${t.drawDates.join(',')}</td>
+                  <td><details><summary>View Lines</summary>${linesHtml}</details></td>
+                  <td><button onclick="removeTicket(${i})">Remove</button></td>`;
     tb.appendChild(tr);
   });
   countLines();
 }
+
 function removeTicket(i){
   tickets.splice(i,1);
   renderTickets();
 }
 document.getElementById('clear').addEventListener('click',()=>{
-  tickets=[]; renderTickets(); document.getElementById('resultDate').value='';
+  tickets=[]; renderTickets(); renderLastTicketPreview(null); document.getElementById('resultDate').value='';
 });
 
-// --- compact encoder (for URL generation) ---
+// --- compact encoder ---
 function base64UrlEncode(bytes){
   let bin=""; bytes.forEach(b=> bin+=String.fromCharCode(b));
   return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -157,6 +173,15 @@ document.getElementById('generate').addEventListener('click',()=>{
   const base = location.origin + location.pathname.replace(/admin\.html$/, '');
   const url = base + (base.endsWith('/') ? '' : '/') + 'index.html' + '?' + params.toString();
   document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
+});
+
+// --- TinyURL shorten ---
+document.getElementById('shorten').addEventListener('click',()=>{
+  const linkBox=document.querySelector('#outputLink a');
+  if(!linkBox){ alert('Generate a link first!'); return; }
+  const longUrl=encodeURIComponent(linkBox.href);
+  const tinyUrl="https://tinyurl.com/create.php?url="+longUrl;
+  window.open(tinyUrl,'_blank');
 });
 
 // --- JSON export ---
