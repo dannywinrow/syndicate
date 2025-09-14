@@ -35,6 +35,8 @@
   #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;}
   #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
   #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
+  #sortControls{margin:10px 0;}
+  button{padding:6px 10px;margin:2px;border:1px solid #ccc;border-radius:6px;cursor:pointer;background:#fafafa;}
   @media(max-width:640px){
     .num{width:28px;height:28px;line-height:28px;font-size:13px;margin:1px;}
     td,th{font-size:12px;padding:3px}
@@ -45,12 +47,16 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.2 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.4 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
 <table id="summaryTable"></table>
 <div id="totalWinnings"></div>
+
+<div id="sortControls">
+  <button id="toggleSort">Sort by Ticket/Line</button>
+</div>
 
 <table class="ticket-grid" id="ticketTable">
   <thead>
@@ -108,14 +114,14 @@ function parseTickets(str){
 
 // --- Prize tables ---
 let prizeTable={
-  0:{label:"0 matches",prize:"-",value:0},
-  1:{label:"1 match",prize:"-",value:0},
-  2:{label:"2 matches",prize:"Free Ticket",value:0},
-  3:{label:"3 matches",prize:"£30",value:30},
-  4:{label:"4 matches",prize:"£140",value:140},
-  5:{label:"5 matches",prize:"£1,750",value:1750},
+  0:{label:"0",prize:"-",value:0},
+  1:{label:"1",prize:"-",value:0},
+  2:{label:"2",prize:"Lucky Dip",value:0},
+  3:{label:"3",prize:"£30",value:30},
+  4:{label:"4",prize:"£140",value:140},
+  5:{label:"5",prize:"£1,750",value:1750},
   "5+Bonus":{label:"5 + Bonus",prize:"£1,000,000",value:1000000},
-  6:{label:"6 matches",prize:"Jackpot!",value:null}
+  6:{label:"6",prize:"Jackpot!",value:null}
 };
 function parseCustomPrizes(p){
   const out={...prizeTable};
@@ -123,7 +129,11 @@ function parseCustomPrizes(p){
     const [cat,val]=entry.split(":");
     if(!cat||!val) return;
     let key=cat==="5b"?"5+Bonus":cat;
-    out[key]={label:key,prize:"£"+parseInt(val,10).toLocaleString(),value:parseInt(val,10)};
+    if(key==2){
+      out[key]={label:"2",prize:"Lucky Dip + £"+parseInt(val,10).toLocaleString(),value:parseInt(val,10)};
+    } else {
+      out[key]={label:key,prize:"£"+parseInt(val,10).toLocaleString(),value:parseInt(val,10)};
+    }
   });
   return out;
 }
@@ -137,9 +147,9 @@ function lineLabel(ticketId, lineNo, totalTickets){
 }
 
 // --- Main rendering logic ---
+let lastResults=[], sortMode="matches";
+
 function renderResults(tickets,mainNums,bonus){
-  const tbody=document.querySelector("#ticketTable tbody");
-  tbody.innerHTML="";
   const results=[];
 
   tickets.forEach(t=>{
@@ -155,13 +165,30 @@ function renderResults(tickets,mainNums,bonus){
     });
   });
 
-  const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
-  results.sort((a,b)=>{
-    const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
-    if(rb!==ra) return rb-ra;
-    if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
-    return a.lineNo-b.lineNo;
-  });
+  lastResults=results;
+  renderTable();
+  summarize(results.map(r=>r.category));
+}
+
+function renderTable(){
+  const tbody=document.querySelector("#ticketTable tbody");
+  tbody.innerHTML="";
+  let results=[...lastResults];
+
+  if(sortMode==="matches"){
+    const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
+    results.sort((a,b)=>{
+      const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
+      if(rb!==ra) return rb-ra;
+      if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
+      return a.lineNo-b.lineNo;
+    });
+  } else {
+    results.sort((a,b)=>{
+      if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
+      return a.lineNo-b.lineNo;
+    });
+  }
 
   results.forEach(r=>{
     const tr=document.createElement("tr");
@@ -169,7 +196,7 @@ function renderResults(tickets,mainNums,bonus){
     // Line number cell
     const tdLine=document.createElement("td");
     tdLine.className="lineNo";
-    tdLine.textContent=lineLabel(r.ticketId, r.lineNo, tickets.length);
+    tdLine.textContent=lineLabel(r.ticketId, r.lineNo, lastResults.reduce((max,t)=>Math.max(max,t.ticketId),1));
     tr.appendChild(tdLine);
 
     // Numbers cell
@@ -180,9 +207,9 @@ function renderResults(tickets,mainNums,bonus){
       if(mainNums.includes(n)) s.classList.add("matchMain");
       if(n===bonus){
         if(r.category==="5+Bonus"){
-          s.classList.add("matchBonus"); // strong only for 5+Bonus wins
+          s.classList.add("matchBonus");
         } else {
-          s.classList.add("matchBonusDim"); // subtle tint otherwise
+          s.classList.add("matchBonusDim");
         }
       }
       s.textContent=String(n).padStart(2,"0");
@@ -192,18 +219,14 @@ function renderResults(tickets,mainNums,bonus){
 
     tbody.appendChild(tr);
   });
-
-  summarize(results.map(r=>r.category));
 }
 
 function summarize(results){
   const counts={}; results.forEach(c=>counts[c]=(counts[c]||0)+1);
-  const totalLines=results.length;
-  document.getElementById("summary").textContent=`Total lines evaluated: ${totalLines}`;
   const summaryTable=document.getElementById("summaryTable");
   summaryTable.innerHTML="";
   const thead=document.createElement("thead");
-  thead.innerHTML="<tr><th>Category</th><th>Line count</th><th>Prize</th><th>Total value</th></tr>";
+  thead.innerHTML="<tr><th>Matches</th><th>Line count</th><th>Prize</th><th>Total value</th></tr>";
   const tb=document.createElement("tbody");
   let cashTotal=0, freeTickets=0, sumCount=0;
   const order=[0,1,2,3,4,5,"5+Bonus",6];
@@ -213,7 +236,11 @@ function summarize(results){
     if(!info) return;
     let prizeLabel=info.prize;
     let val=info.value;
-    if(typeof val==="number" && val>0){
+    if(cat==2){
+      prizeLabel="Lucky Dip";
+      if(val>0){ prizeLabel+=" + £"+val.toLocaleString(); }
+    }
+    if(typeof val==="number" && val>0 && cat!=2){
       prizeLabel="£"+val.toLocaleString();
     }
     let totalVal="-";
@@ -244,17 +271,27 @@ else if(params.get("tickets")) tickets=parseTickets(params.get("tickets"));
 
 if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
 
+let mainNums=[], bonus=null;
+
 const draw=params.get("draw");
 if(draw){
   const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
   if(arr.length>=6){
-    const mainNums=arr.slice(0,6), bonus=(arr.length>=7?arr[6]:null);
-    const disp=document.getElementById("winningDisplay"); disp.innerHTML="";
+    mainNums=arr.slice(0,6); bonus=(arr.length>=7?arr[6]:null);
+    const disp=document.getElementById("winningDisplay");
+    disp.innerHTML="<h2>Winning Numbers</h2>";
     mainNums.forEach(n=>{ const s=document.createElement("span"); s.className="num drawnum"; s.textContent=String(n).padStart(2,"0"); disp.appendChild(s); });
     if(bonus){ const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b); }
     renderResults(tickets,mainNums,bonus);
   }
 }
+
+// Toggle sort mode
+document.getElementById("toggleSort").addEventListener("click",()=>{
+  if(sortMode==="matches"){ sortMode="ticket"; document.getElementById("toggleSort").textContent="Sort by Matches"; }
+  else { sortMode="matches"; document.getElementById("toggleSort").textContent="Sort by Ticket/Line"; }
+  renderTable();
+});
 </script>
 </body>
 </html>
