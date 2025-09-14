@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Syndicate Lotto Checker</title>
+<style>
+  body{font-family:system-ui, sans-serif; margin:20px;}
+  h1{font-size:20px;}
+  .ticket-grid{border-collapse:collapse;width:100%;margin-top:10px;}
+  .ticket-grid th,.ticket-grid td{border:1px solid #ccc;padding:6px;text-align:center;}
+  .num{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;height:34px;
+    border-radius:50%;
+    border:1px solid #ddd;
+    margin:2px;font-weight:600;
+  }
+  .matchMain{background:#ffeb3b}
+  .matchBonus{background:#f44336;color:#fff}
+  .drawnum{background:#1976d2;color:#fff;font-weight:bold}
+  .bonus{background:#d32f2f;color:#fff;font-weight:bold}
+  #winningDisplay{display:flex;justify-content:center;margin:20px 0;}
+  #summary{margin:15px 0;font-weight:bold}
+  #summaryTable{border-collapse:collapse;margin-bottom:15px;}
+  #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
+  #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>Syndicate Lotto Checker</h1>
+
+<div id="winningDisplay"></div>
+<div id="summary"></div>
+<table id="summaryTable"></table>
+<div id="totalWinnings"></div>
+
+<table class="ticket-grid" id="ticketTable">
+  <thead>
+    <tr><th>Ticket</th><th>Line</th><th>Numbers</th><th>Matches</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+// --- Helpers ---
+function base64UrlDecode(str){
+  str=str.replace(/-/g,'+').replace(/_/g,'/');
+  const pad=str.length%4 ? 4-(str.length%4) : 0;
+  if(pad) str+='='.repeat(pad);
+  const bin=atob(str);
+  return Uint8Array.from(bin,c=>c.charCodeAt(0));
+}
+function decodeCompactTickets(t){
+  const bytes=base64UrlDecode(t);
+  let bitpos=0;
+  function getBits(n){
+    let val=0;
+    for(let i=0;i<n;i++){
+      const byte=bytes[Math.floor(bitpos/8)];
+      const bit=7-(bitpos%8);
+      val=(val<<1)|((byte>>bit)&1);
+      bitpos++;
+    }
+    return val;
+  }
+  const lineCount=getBits(16);
+  const lines=[];
+  for(let i=0;i<lineCount;i++){
+    const arr=[];
+    for(let j=0;j<6;j++) arr.push(getBits(6)+1);
+    lines.push(arr);
+  }
+  return [{id:1,lines}];
+}
+function parseTickets(str){
+  if(!str) return [];
+  return str.split(";").filter(x=>x && x!=="0").map((chunk,idx)=>{
+    const nums=(chunk.split("-")[2]||"");
+    const lines=[];
+    for(let i=0;i+12<=nums.length;i+=12){
+      const row=[];
+      for(let j=0;j<12;j+=2){
+        row.push(parseInt(nums.slice(i+j,i+j+2),10));
+      }
+      lines.push(row);
+    }
+    return {id:idx+1,lines};
+  });
+}
+
+// --- Prize tables ---
+let prizeTable={
+  0:{label:"0 matches",prize:"-",value:0},
+  1:{label:"1 match",prize:"-",value:0},
+  2:{label:"2 matches",prize:"Free Ticket",value:0},
+  3:{label:"3 matches",prize:"£30",value:30},
+  4:{label:"4 matches",prize:"£140",value:140},
+  5:{label:"5 matches",prize:"£1,750",value:1750},
+  "5+Bonus":{label:"5 + Bonus",prize:"£1,000,000",value:1000000},
+  6:{label:"6 matches",prize:"Jackpot!",value:null}
+};
+function parseCustomPrizes(p){
+  const out={};
+  p.split(";").forEach(entry=>{
+    const [cat,val]=entry.split(":");
+    if(!cat||!val) return;
+    let key=cat==="5b"?"5+Bonus":cat;
+    out[key]={label:key,prize:"£"+val,value:parseInt(val,10)};
+  });
+  return out;
+}
+
+// --- Rendering ---
+function renderTickets(tickets){
+  const tbody=document.querySelector("#ticketTable tbody");
+  tbody.innerHTML="";
+  tickets.forEach(t=>{
+    t.lines.forEach((line,i)=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${t.id}</td><td>${i+1}</td><td class="nums"></td><td class="matches">-</td>`;
+      const numsTd=tr.querySelector(".nums");
+      line.forEach(n=>{
+        const span=document.createElement("span");
+        span.className="num";
+        span.textContent=String(n).padStart(2,"0");
+        numsTd.appendChild(span);
+      });
+      tbody.appendChild(tr);
+    });
+  });
+}
+function applyDraw(mainNums,bonus){
+  const rows=document.querySelectorAll("#ticketTable tbody tr");
+  const results=[];
+  rows.forEach(row=>{
+    const spans=row.querySelectorAll(".num");
+    let count=0, hasBonus=false;
+    spans.forEach(s=>{
+      const val=parseInt(s.textContent,10);
+      if(mainNums.includes(val)){ s.classList.add("matchMain"); count++; }
+      else if(val===bonus){ s.classList.add("matchBonus"); hasBonus=true; }
+      else s.classList.remove("matchMain","matchBonus");
+    });
+    let category=count;
+    if(count===5 && hasBonus) category="5+Bonus";
+    row.querySelector(".matches").textContent=category;
+    results.push(category);
+  });
+  summarize(results);
+}
+function summarize(results){
+  const counts={}; results.forEach(c=>counts[c]=(counts[c]||0)+1);
+  const totalLines=results.length;
+  document.getElementById("summary").textContent=`Total lines evaluated: ${totalLines}`;
+  const summaryTable=document.getElementById("summaryTable");
+  summaryTable.innerHTML="";
+  const thead=document.createElement("thead");
+  thead.innerHTML="<tr><th>Category</th><th>Line count</th><th>Prize</th><th>Total value</th></tr>";
+  const tb=document.createElement("tbody");
+  let cashTotal=0, freeTickets=0, sumCount=0;
+  Object.keys(prizeTable).forEach(cat=>{
+    const c=counts[cat]||0; sumCount+=c;
+    let prizeLabel=prizeTable[cat].prize;
+    let val=prizeTable[cat].value;
+    let totalVal="-";
+    if(val!==null){
+      if(val>0){ totalVal="£"+(val*c).toLocaleString(); cashTotal+=val*c; }
+      else if(cat==2){ freeTickets+=c; }
+    }
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${cat}</td><td>${c}</td><td>${prizeLabel}</td><td>${totalVal}</td>`;
+    tb.appendChild(tr);
+  });
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td><b>Total</b></td><td><b>${sumCount}</b></td><td></td><td><b>£${cashTotal.toLocaleString()}</b></td>`;
+  tb.appendChild(tr);
+  summaryTable.appendChild(thead); summaryTable.appendChild(tb);
+  let totalText="Total winnings: ";
+  if(cashTotal>0) totalText+="£"+cashTotal.toLocaleString();
+  if(freeTickets>0) totalText+=(cashTotal>0?" and ":"")+freeTickets+" Free Ticket(s)";
+  if(cashTotal===0 && freeTickets===0) totalText+="None";
+  document.getElementById("totalWinnings").textContent=totalText;
+}
+
+// --- Main ---
+const params=new URLSearchParams(location.search);
+let tickets=[];
+if(params.get("t")) tickets=decodeCompactTickets(params.get("t"));
+else if(params.get("tickets")) tickets=parseTickets(params.get("tickets"));
+renderTickets(tickets);
+if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
+const draw=params.get("draw");
+if(draw){
+  const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
+  if(arr.length===7){
+    const mainNums=arr.slice(0,6), bonus=arr[6];
+    const disp=document.getElementById("winningDisplay"); disp.innerHTML="";
+    mainNums.forEach(n=>{ const s=document.createElement("span"); s.className="num drawnum"; s.textContent=String(n).padStart(2,"0"); disp.appendChild(s); });
+    const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b);
+    applyDraw(mainNums,bonus);
+  }
+}
+</script>
+</body>
+</html>
