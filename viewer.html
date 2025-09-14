@@ -31,6 +31,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
+<p style="color:#666;font-size:12px;">Version 0.3.6 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -103,14 +104,14 @@ let prizeTable={
   6:{label:"6 matches",prize:"Jackpot!",value:null}
 };
 function parseCustomPrizes(p){
-  const out={};
+  const out={...prizeTable};
   p.split(";").forEach(entry=>{
     const [cat,val]=entry.split(":");
     if(!cat||!val) return;
     let key=cat==="5b"?"5+Bonus":cat;
     out[key]={label:key,prize:"£"+val,value:parseInt(val,10)};
   });
-  return {...prizeTable,...out};
+  return out;
 }
 
 // --- Main rendering logic ---
@@ -132,19 +133,18 @@ function renderResults(tickets,mainNums,bonus){
     });
   });
 
-  // sort by matchCount desc, then bonus, then ticket/line
+  // strict category rank
+  const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
+
   results.sort((a,b)=>{
-    if(b.matchCount!==a.matchCount) return b.matchCount-a.matchCount;
-    if(a.hasBonus!==b.hasBonus) return b.hasBonus-a.hasBonus;
+    const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
+    if(rb!==ra) return rb-ra;
     if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
     return a.lineNo-b.lineNo;
   });
 
-  // render table
   results.forEach(r=>{
     const tr=document.createElement("tr");
-    const numsTd=document.createElement("td");
-    numsTd.colSpan=1;
     tr.innerHTML=`<td>${r.ticketId}</td><td>${r.lineNo}</td>`;
     const tdNums=document.createElement("td");
     r.numbers.forEach(n=>{
@@ -213,11 +213,11 @@ if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
 const draw=params.get("draw");
 if(draw){
   const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
-  if(arr.length===7){
-    const mainNums=arr.slice(0,6), bonus=arr[6];
+  if(arr.length>=6){
+    const mainNums=arr.slice(0,6), bonus=(arr.length>=7?arr[6]:null);
     const disp=document.getElementById("winningDisplay"); disp.innerHTML="";
     mainNums.forEach(n=>{ const s=document.createElement("span"); s.className="num drawnum"; s.textContent=String(n).padStart(2,"0"); disp.appendChild(s); });
-    const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b);
+    if(bonus){ const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b); }
     renderResults(tickets,mainNums,bonus);
   }
 }
