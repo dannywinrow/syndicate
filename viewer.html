@@ -50,7 +50,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.6 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.7 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -69,7 +69,7 @@
 </table>
 
 <script>
-// --- Helpers ---
+// ---------------- Helpers ----------------
 function base64UrlDecode(str){
   str=str.replace(/-/g,'+').replace(/_/g,'/');
   const pad=str.length%4 ? 4-(str.length%4) : 0;
@@ -77,6 +77,7 @@ function base64UrlDecode(str){
   const bin=atob(str);
   return Uint8Array.from(bin,c=>c.charCodeAt(0));
 }
+
 function decodeCompactTickets(t){
   const bytes=base64UrlDecode(t);
   let bitpos=0;
@@ -99,6 +100,7 @@ function decodeCompactTickets(t){
   }
   return [{id:1,lines}];
 }
+
 function parseTickets(str){
   if(!str) return [];
   return str.split(";").filter(x=>x && x!=="0").map((chunk,idx)=>{
@@ -110,12 +112,12 @@ function parseTickets(str){
         row.push(parseInt(nums.slice(i+j,i+j+2),10));
       }
       lines.push(row);
-    });
+    }
     return {id:idx+1,lines};
   });
 }
 
-// --- Prize tables ---
+// ---------------- Prize tables ----------------
 let prizeTable={
   0:{label:"0",prize:"-",value:0},
   1:{label:"1",prize:"-",value:0},
@@ -126,6 +128,7 @@ let prizeTable={
   "5+Bonus":{label:"5 + Bonus",prize:"£1,000,000",value:1000000},
   6:{label:"6",prize:"Jackpot!",value:null}
 };
+
 function parseCustomPrizes(p){
   const out={...prizeTable};
   p.split(";").forEach(entry=>{
@@ -141,7 +144,7 @@ function parseCustomPrizes(p){
   return out;
 }
 
-// --- Label helper ---
+// ---------------- Label helper ----------------
 function lineLabel(ticketId, lineNo, totalTickets){
   const letters=["A","B","C","D","E","F","G"];
   const linePart=(lineNo<=7 ? letters[lineNo-1] : String(lineNo));
@@ -149,7 +152,20 @@ function lineLabel(ticketId, lineNo, totalTickets){
   return `${ticketId}:${linePart}`;
 }
 
-// --- Main rendering logic ---
+// ---------------- Date formatter ----------------
+function formatDate(str){
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if(isoMatch){
+    const [_,y,m,d] = isoMatch;
+    const dt = new Date(`${y}-${m}-${d}T00:00:00Z`);
+    return dt.toLocaleDateString("en-GB", {
+      weekday:"short", day:"2-digit", month:"short", year:"numeric"
+    });
+  }
+  return str;
+}
+
+// ---------------- Main rendering ----------------
 let lastResults=[], sortMode="matches", mainNums=[], bonus=null;
 
 function renderResults(tickets,mainNums,bonus){
@@ -196,24 +212,23 @@ function renderTable(){
   results.forEach(r=>{
     const tr=document.createElement("tr");
 
-    // Line number cell
     const tdLine=document.createElement("td");
     tdLine.className="lineNo";
-    tdLine.textContent=lineLabel(r.ticketId, r.lineNo, lastResults.reduce((max,t)=>Math.max(max,t.ticketId),1));
+    tdLine.textContent=lineLabel(
+      r.ticketId,
+      r.lineNo,
+      lastResults.reduce((max,t)=>Math.max(max,t.ticketId),1)
+    );
     tr.appendChild(tdLine);
 
-    // Numbers cell
     const tdNums=document.createElement("td");
     r.numbers.forEach(n=>{
       const s=document.createElement("span");
       s.className="num";
       if(mainNums.includes(n)) s.classList.add("matchMain");
       if(n===bonus){
-        if(r.category==="5+Bonus"){
-          s.classList.add("matchBonus");
-        } else {
-          s.classList.add("matchBonusDim");
-        }
+        if(r.category==="5+Bonus") s.classList.add("matchBonus");
+        else s.classList.add("matchBonusDim");
       }
       s.textContent=String(n).padStart(2,"0");
       tdNums.appendChild(s);
@@ -266,7 +281,7 @@ function summarize(results){
   document.getElementById("totalWinnings").textContent=totalText;
 }
 
-// --- Main ---
+// ---------------- Main ----------------
 const params=new URLSearchParams(location.search);
 let tickets=[];
 if(params.get("t")) tickets=decodeCompactTickets(params.get("t"));
@@ -278,7 +293,8 @@ const draw=params.get("draw");
 if(draw){
   const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
   if(arr.length>=6){
-    mainNums=arr.slice(0,6); bonus=(arr.length>=7?arr[6]:null);
+    mainNums=arr.slice(0,6);
+    bonus=(arr.length>=7?arr[6]:null);
     const disp=document.getElementById("winningDisplay");
     disp.innerHTML="";
     const heading=document.createElement("h2");
@@ -287,7 +303,7 @@ if(draw){
     if(params.get("date")){
       const dateP=document.createElement("p");
       dateP.className="drawDate";
-      dateP.textContent="Draw Date: "+params.get("date");
+      dateP.textContent="Draw Date: "+formatDate(params.get("date"));
       disp.appendChild(dateP);
     }
     const numsDiv=document.createElement("div");
@@ -309,10 +325,14 @@ if(draw){
   }
 }
 
-// Toggle sort mode
 document.getElementById("toggleSort").addEventListener("click",()=>{
-  if(sortMode==="matches"){ sortMode="ticket"; document.getElementById("toggleSort").textContent="Sort by Matches"; }
-  else { sortMode="matches"; document.getElementById("toggleSort").textContent="Sort by Ticket/Line"; }
+  if(sortMode==="matches"){
+    sortMode="ticket";
+    document.getElementById("toggleSort").textContent="Sort by Matches";
+  } else {
+    sortMode="matches";
+    document.getElementById("toggleSort").textContent="Sort by Ticket/Line";
+  }
   renderTable();
 });
 </script>
