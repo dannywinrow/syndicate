@@ -110,47 +110,61 @@ function parseCustomPrizes(p){
     let key=cat==="5b"?"5+Bonus":cat;
     out[key]={label:key,prize:"£"+val,value:parseInt(val,10)};
   });
-  return out;
+  return {...prizeTable,...out};
 }
 
-// --- Rendering ---
-function renderTickets(tickets){
+// --- Main rendering logic ---
+function renderResults(tickets,mainNums,bonus){
   const tbody=document.querySelector("#ticketTable tbody");
   tbody.innerHTML="";
+  const results=[];
+
   tickets.forEach(t=>{
     t.lines.forEach((line,i)=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${t.id}</td><td>${i+1}</td><td class="nums"></td><td class="matches">-</td>`;
-      const numsTd=tr.querySelector(".nums");
+      let count=0, hasBonus=false;
       line.forEach(n=>{
-        const span=document.createElement("span");
-        span.className="num";
-        span.textContent=String(n).padStart(2,"0");
-        numsTd.appendChild(span);
+        if(mainNums.includes(n)) count++;
+        if(n===bonus) hasBonus=true;
       });
-      tbody.appendChild(tr);
+      let category=count;
+      if(count===5 && hasBonus) category="5+Bonus";
+      results.push({ticketId:t.id,lineNo:i+1,numbers:line,matchCount:count,hasBonus,category});
     });
   });
-}
-function applyDraw(mainNums,bonus){
-  const rows=document.querySelectorAll("#ticketTable tbody tr");
-  const results=[];
-  rows.forEach(row=>{
-    const spans=row.querySelectorAll(".num");
-    let count=0, hasBonus=false;
-    spans.forEach(s=>{
-      const val=parseInt(s.textContent,10);
-      if(mainNums.includes(val)){ s.classList.add("matchMain"); count++; }
-      else if(val===bonus){ s.classList.add("matchBonus"); hasBonus=true; }
-      else s.classList.remove("matchMain","matchBonus");
-    });
-    let category=count;
-    if(count===5 && hasBonus) category="5+Bonus";
-    row.querySelector(".matches").textContent=category;
-    results.push(category);
+
+  // sort by matchCount desc, then bonus, then ticket/line
+  results.sort((a,b)=>{
+    if(b.matchCount!==a.matchCount) return b.matchCount-a.matchCount;
+    if(a.hasBonus!==b.hasBonus) return b.hasBonus-a.hasBonus;
+    if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
+    return a.lineNo-b.lineNo;
   });
-  summarize(results);
+
+  // render table
+  results.forEach(r=>{
+    const tr=document.createElement("tr");
+    const numsTd=document.createElement("td");
+    numsTd.colSpan=1;
+    tr.innerHTML=`<td>${r.ticketId}</td><td>${r.lineNo}</td>`;
+    const tdNums=document.createElement("td");
+    r.numbers.forEach(n=>{
+      const s=document.createElement("span");
+      s.className="num";
+      if(mainNums.includes(n)) s.classList.add("matchMain");
+      if(n===bonus) s.classList.add("matchBonus");
+      s.textContent=String(n).padStart(2,"0");
+      tdNums.appendChild(s);
+    });
+    const tdCat=document.createElement("td");
+    tdCat.textContent=r.category;
+    tr.appendChild(tdNums);
+    tr.appendChild(tdCat);
+    tbody.appendChild(tr);
+  });
+
+  summarize(results.map(r=>r.category));
 }
+
 function summarize(results){
   const counts={}; results.forEach(c=>counts[c]=(counts[c]||0)+1);
   const totalLines=results.length;
@@ -161,17 +175,20 @@ function summarize(results){
   thead.innerHTML="<tr><th>Category</th><th>Line count</th><th>Prize</th><th>Total value</th></tr>";
   const tb=document.createElement("tbody");
   let cashTotal=0, freeTickets=0, sumCount=0;
-  Object.keys(prizeTable).forEach(cat=>{
+  const order=[0,1,2,3,4,5,"5+Bonus",6];
+  order.forEach(cat=>{
     const c=counts[cat]||0; sumCount+=c;
-    let prizeLabel=prizeTable[cat].prize;
-    let val=prizeTable[cat].value;
+    const info=prizeTable[cat];
+    if(!info) return;
+    let prizeLabel=info.prize;
+    let val=info.value;
     let totalVal="-";
     if(val!==null){
       if(val>0){ totalVal="£"+(val*c).toLocaleString(); cashTotal+=val*c; }
       else if(cat==2){ freeTickets+=c; }
     }
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${cat}</td><td>${c}</td><td>${prizeLabel}</td><td>${totalVal}</td>`;
+    tr.innerHTML=`<td>${info.label||cat}</td><td>${c}</td><td>${prizeLabel}</td><td>${totalVal}</td>`;
     tb.appendChild(tr);
   });
   const tr=document.createElement("tr");
@@ -190,8 +207,9 @@ const params=new URLSearchParams(location.search);
 let tickets=[];
 if(params.get("t")) tickets=decodeCompactTickets(params.get("t"));
 else if(params.get("tickets")) tickets=parseTickets(params.get("tickets"));
-renderTickets(tickets);
+
 if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
+
 const draw=params.get("draw");
 if(draw){
   const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
@@ -200,7 +218,7 @@ if(draw){
     const disp=document.getElementById("winningDisplay"); disp.innerHTML="";
     mainNums.forEach(n=>{ const s=document.createElement("span"); s.className="num drawnum"; s.textContent=String(n).padStart(2,"0"); disp.appendChild(s); });
     const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b);
-    applyDraw(mainNums,bonus);
+    renderResults(tickets,mainNums,bonus);
   }
 }
 </script>
