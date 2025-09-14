@@ -8,7 +8,7 @@
   body{font-family:system-ui, sans-serif; margin:20px;}
   h1{font-size:20px;}
   .ticket-grid{border-collapse:collapse;width:100%;margin-top:10px;}
-  .ticket-grid th,.ticket-grid td{border:1px solid #ccc;padding:6px;text-align:center;}
+  .ticket-grid th,.ticket-grid td{border:1px solid #ccc;padding:6px;text-align:center;vertical-align:middle;}
   .num{
     display:inline-flex;
     align-items:center;
@@ -20,9 +20,16 @@
   }
   .matchMain{background:#ffeb3b}
   .matchBonus{background:#f44336;color:#fff}
-  .matchBonusDim{background:rgba(244,67,54,0.25);color:#000}
+  .matchBonusDim{background:rgba(244,67,54,0.12);color:#000}
   .drawnum{background:#1976d2;color:#fff;font-weight:bold}
   .bonus{background:#d32f2f;color:#fff;font-weight:bold}
+  .lineNo{
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size:10px;
+    color:#666;
+    width:12px;
+  }
   #winningDisplay{display:flex;justify-content:center;margin:20px 0;flex-wrap:wrap;}
   #summary{margin:15px 0;font-weight:bold}
   #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;}
@@ -30,14 +37,15 @@
   #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
   @media(max-width:640px){
     .num{width:28px;height:28px;line-height:28px;font-size:13px;margin:1px;}
-    td,th{font-size:13px;padding:4px}
+    td,th{font-size:12px;padding:3px}
     h1{font-size:18px;}
+    .lineNo{font-size:8px;}
   }
 </style>
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.3.7 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.0 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -46,7 +54,7 @@
 
 <table class="ticket-grid" id="ticketTable">
   <thead>
-    <tr><th>Ticket</th><th>Line</th><th>Numbers</th><th>Matches</th></tr>
+    <tr><th>Line</th><th>Numbers</th></tr>
   </thead>
   <tbody></tbody>
 </table>
@@ -115,7 +123,7 @@ function parseCustomPrizes(p){
     const [cat,val]=entry.split(":");
     if(!cat||!val) return;
     let key=cat==="5b"?"5+Bonus":cat;
-    out[key]={label:key,prize:"£"+val,value:parseInt(val,10)};
+    out[key]={label:key,prize:"£"+parseInt(val,10).toLocaleString(),value:parseInt(val,10)};
   });
   return out;
 }
@@ -149,7 +157,14 @@ function renderResults(tickets,mainNums,bonus){
 
   results.forEach(r=>{
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${r.ticketId}</td><td>${r.lineNo}</td>`;
+
+    // Line number cell
+    const tdLine=document.createElement("td");
+    tdLine.className="lineNo";
+    tdLine.textContent=r.lineNo;
+    tr.appendChild(tdLine);
+
+    // Numbers cell
     const tdNums=document.createElement("td");
     r.numbers.forEach(n=>{
       const s=document.createElement("span");
@@ -165,10 +180,8 @@ function renderResults(tickets,mainNums,bonus){
       s.textContent=String(n).padStart(2,"0");
       tdNums.appendChild(s);
     });
-    const tdCat=document.createElement("td");
-    tdCat.textContent=r.category;
     tr.appendChild(tdNums);
-    tr.appendChild(tdCat);
+
     tbody.appendChild(tr);
   });
 
@@ -192,6 +205,9 @@ function summarize(results){
     if(!info) return;
     let prizeLabel=info.prize;
     let val=info.value;
+    if(typeof val==="number" && val>0){
+      prizeLabel="£"+val.toLocaleString();
+    }
     let totalVal="-";
     if(val!==null){
       if(val>0){ totalVal="£"+(val*c).toLocaleString(); cashTotal+=val*c; }
