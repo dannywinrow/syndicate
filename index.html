@@ -68,26 +68,44 @@ function countLines(){
   tickets.forEach(t=> total+=t.lines.length);
   document.getElementById('lineCount').textContent = 'Total lines scanned: '+total;
 }
+
 function addTicket(raw){
   if(!raw || raw==='0') return;
-  const mF=raw.match(/F(\\d+)/);
-  const mS=raw.match(/S(\\d+)/);
-  if(!mF || !mS) return;
-  const fnum=parseInt(mF[1],10);
-  const s=mS[1];
+
+  // F = draw counter
+  const mF = raw.match(/F(\\d+)/);
+  if(!mF) return;
+  const fnum = parseInt(mF[1],10);
+
+  // Extract numbers
+  let numStr = null;
+  const mS = raw.match(/S(\\d+)/);
+  if(mS) {
+    numStr = mS[1];
+  } else {
+    // fallback: everything after the last "/" if numeric
+    const parts = raw.split("/");
+    const tail = parts[parts.length-1];
+    if(/^[0-9]+$/.test(tail)) numStr = tail;
+  }
+  if(!numStr) return;
+
+  // Parse lines
   const lines=[];
-  for(let i=0;i+12<=s.length;i+=12){
+  for(let i=0;i+12<=numStr.length;i+=12){
     const row=[];
     for(let j=0;j<12;j+=2){
-      row.push(parseInt(s.slice(i+j,i+j+2),10));
+      row.push(parseInt(numStr.slice(i+j,i+j+2),10));
     }
     if(row.length===6) lines.push(row);
   }
+
   const drawDates=[fToDate(fnum)];
   tickets.push({id:tickets.length+1, raw, lines, drawDates});
   renderTickets();
   document.getElementById('resultDate').value = drawDates[0];
 }
+
 function renderTickets(){
   const tb=document.querySelector('#ticketTable tbody');
   tb.innerHTML='';
@@ -108,11 +126,11 @@ document.getElementById('clear').addEventListener('click',()=>{
 
 // --- compact encoder (for URL generation) ---
 function base64UrlEncode(bytes){
-  let bin=''; bytes.forEach(b=> bin+=String.fromCharCode(b));
+  let bin=""; bytes.forEach(b=> bin+=String.fromCharCode(b));
   return btoa(bin).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 }
 function encodeCompactTickets(lines){
-  const bits=[]; function pushBits(val,n){for(let i=n-1;i>=0;i--) bits.push((val>>i)&1);}
+  const bits=[]; function pushBits(val,n){for(let i=n-1;i>=0;i--) bits.push((val>>i)&1);} 
   pushBits(lines.length,16);
   lines.forEach(line=> line.forEach(n=> pushBits(n-1,6)));
   const bytes=new Uint8Array(Math.ceil(bits.length/8));
@@ -131,13 +149,13 @@ document.getElementById('generate').addEventListener('click',()=>{
   const draw=document.getElementById('drawInput').value.trim();
   if(draw) params.set('draw',draw);
   const prizeStr=[]; const map={p2:'2',p3:'3',p4:'4',p5:'5',p5b:'5b',p6:'6'};
-  for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+':'+v);}
+  for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+":"+v);} 
   if(prizeStr.length) params.set('p',prizeStr.join(';'));
   const compact=encodeCompactTickets(allLines);
   params.set('t',compact);
   const base = location.origin + location.pathname.replace(/admin\\.html$/, '');
   const url = base + (base.endsWith('/') ? '' : '/') + 'index.html' + '?' + params.toString();
-  document.getElementById('outputLink').innerHTML = `Share this link:<br><a href=\"${url}\" target=\"_blank\">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
+  document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
 });
 
 // --- JSON export ---
@@ -150,7 +168,7 @@ document.getElementById('exportJson').addEventListener('click',()=>{
     if(arr.length===7){
       const dateVal=document.getElementById('resultDate').value||'unknown';
       const prizeStr=[]; const map={p2:'2',p3:'3',p4:'4',p5:'5',p5b:'5b',p6:'6'};
-      for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+':'+v);}
+      for(const id in map){const v=document.getElementById(id).value.trim(); if(v) prizeStr.push(map[id]+":"+v);} 
       data.results=[{date:dateVal, draw:arr, prizes:prizeStr.join(';')}];
     }
   }
