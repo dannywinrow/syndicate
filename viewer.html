@@ -30,7 +30,10 @@
     color:#666;
     width:16px;
   }
-  #winningDisplay{display:flex;justify-content:center;margin:20px 0;flex-wrap:wrap;}
+  #winningDisplay{margin:20px 0;text-align:center;}
+  #winningDisplay h2{margin-bottom:6px;}
+  #winningDisplay .drawDate{color:#666;font-size:14px;margin:-4px 0 12px;}
+  #winningNums{display:flex;justify-content:center;flex-wrap:wrap;}
   #summary{margin:15px 0;font-weight:bold}
   #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;}
   #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
@@ -47,7 +50,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.4 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.6 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 <div id="summary"></div>
@@ -107,7 +110,7 @@ function parseTickets(str){
         row.push(parseInt(nums.slice(i+j,i+j+2),10));
       }
       lines.push(row);
-    }
+    });
     return {id:idx+1,lines};
   });
 }
@@ -147,7 +150,7 @@ function lineLabel(ticketId, lineNo, totalTickets){
 }
 
 // --- Main rendering logic ---
-let lastResults=[], sortMode="matches";
+let lastResults=[], sortMode="matches", mainNums=[], bonus=null;
 
 function renderResults(tickets,mainNums,bonus){
   const results=[];
@@ -271,17 +274,37 @@ else if(params.get("tickets")) tickets=parseTickets(params.get("tickets"));
 
 if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
 
-let mainNums=[], bonus=null;
-
 const draw=params.get("draw");
 if(draw){
   const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
   if(arr.length>=6){
     mainNums=arr.slice(0,6); bonus=(arr.length>=7?arr[6]:null);
     const disp=document.getElementById("winningDisplay");
-    disp.innerHTML="<h2>Winning Numbers</h2>";
-    mainNums.forEach(n=>{ const s=document.createElement("span"); s.className="num drawnum"; s.textContent=String(n).padStart(2,"0"); disp.appendChild(s); });
-    if(bonus){ const b=document.createElement("span"); b.className="num bonus"; b.textContent=String(bonus).padStart(2,"0"); disp.appendChild(b); }
+    disp.innerHTML="";
+    const heading=document.createElement("h2");
+    heading.textContent="Winning Numbers";
+    disp.appendChild(heading);
+    if(params.get("date")){
+      const dateP=document.createElement("p");
+      dateP.className="drawDate";
+      dateP.textContent="Draw Date: "+params.get("date");
+      disp.appendChild(dateP);
+    }
+    const numsDiv=document.createElement("div");
+    numsDiv.id="winningNums";
+    mainNums.forEach(n=>{
+      const s=document.createElement("span");
+      s.className="num drawnum";
+      s.textContent=String(n).padStart(2,"0");
+      numsDiv.appendChild(s);
+    });
+    if(bonus){
+      const b=document.createElement("span");
+      b.className="num bonus";
+      b.textContent=String(bonus).padStart(2,"0");
+      numsDiv.appendChild(b);
+    }
+    disp.appendChild(numsDiv);
     renderResults(tickets,mainNums,bonus);
   }
 }
