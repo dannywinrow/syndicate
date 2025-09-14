@@ -170,7 +170,7 @@ document.getElementById('generate').addEventListener('click',()=>{
   if(prizeStr.length) params.set('p',prizeStr.join(';'));
   const compact=encodeCompactTickets(allLines);
   params.set('t',compact);
-  const base = location.origin + location.pathname.replace(/admin\.html$/, '');
+  const base = location.origin + location.pathname.replace(/index\.html$/, '');
   const url = base + (base.endsWith('/') ? '' : '/') + 'viewer.html' + '?' + params.toString();
   document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
 });
