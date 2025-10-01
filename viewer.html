@@ -57,7 +57,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.5.1 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.5.2 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 
@@ -197,7 +197,7 @@ let sortMode="matches";
 let mainNums=[];   // will be set by URL draw or live inputs
 let bonus=null;
 
-// ---------------- Input helpers (keyboard niceties) ----------------
+// ---------------- Input niceties ----------------
 function clampValid(val){
   if(val==="" || val==null) return "";
   let n=parseInt(val,10);
@@ -206,27 +206,22 @@ function clampValid(val){
   if(n>59) n=59;
   return String(n).padStart(2,"0");
 }
-
 function attachInputHandlers(inp, index, totalInputs){
-  // Allow only digits; clamp on blur; auto-advance after 2 digits; backspace nav; arrows
   inp.addEventListener("beforeinput", (e)=>{
     if(e.inputType==="insertText" && /\D/.test(e.data)) e.preventDefault();
   });
-
   inp.addEventListener("input",(e)=>{
     let v=e.target.value.replace(/\D/g,"").slice(0,2);
     e.target.value=v;
     if(v.length===2){
       const n=parseInt(v,10);
       if(n<1 || n>59){ e.target.value=""; return; }
-      // auto-advance
       const all = document.querySelectorAll('#winningNums input');
       const next = all[index+1];
       if(next) next.focus();
     }
     maybeApplyFromInputs(); // live update
   });
-
   inp.addEventListener("keydown",(e)=>{
     const all = document.querySelectorAll('#winningNums input');
     const i=index;
@@ -239,10 +234,9 @@ function attachInputHandlers(inp, index, totalInputs){
     }else if(e.key==="Backspace"){
       const val=e.target.value;
       if(val.length>0){
-        // normal deletion, let input event handle update
+        // normal deletion; input event will handle
         return;
       }else{
-        // empty: move to previous and clear it
         if(i>0){
           e.preventDefault();
           const prev=all[i-1];
@@ -253,9 +247,7 @@ function attachInputHandlers(inp, index, totalInputs){
       }
     }
   });
-
   inp.addEventListener("blur",(e)=>{
-    // Format to 2-digits if valid
     const v=e.target.value.trim();
     if(v){
       const clamped=clampValid(v);
@@ -293,7 +285,6 @@ function buildInputsRow(numsDiv){
   numsDiv.appendChild(wrapB);
   inputs.push(inpB);
 
-  // Attach keyboard niceties
   inputs.forEach((el, idx)=>attachInputHandlers(el, idx, inputs.length));
 }
 
@@ -317,7 +308,6 @@ function buildWinningTop(drawProvided){
   numsDiv.id="winningNums";
 
   if(drawProvided){
-    // Fixed balls
     mainNums.forEach(n=>{
       const s=document.createElement("span");
       s.className="num drawnum";
@@ -331,7 +321,6 @@ function buildWinningTop(drawProvided){
       numsDiv.appendChild(b);
     }
   } else {
-    // Editable inputs with niceties
     buildInputsRow(numsDiv);
   }
 
@@ -340,11 +329,11 @@ function buildWinningTop(drawProvided){
 
 // ---------------- Rendering ----------------
 function renderResultsAndSummary(){
-  // show sort & summary sections
-  document.getElementById("sortControls").style.display="";
-  document.getElementById("summary").style.display="";
-  document.getElementById("summaryTable").style.display="";
-  document.getElementById("totalWinnings").style.display="";
+  // Explicitly show sections (override CSS display:none)
+  document.getElementById("sortControls").style.display = "block";
+  document.getElementById("summary").style.display = "block";
+  document.getElementById("summaryTable").style.display = "table";
+  document.getElementById("totalWinnings").style.display = "block";
 
   // compute results then render
   const results=[];
@@ -366,10 +355,10 @@ function renderResultsAndSummary(){
 }
 
 function hideSummary(){
-  document.getElementById("sortControls").style.display="none";
-  document.getElementById("summary").style.display="none";
-  document.getElementById("summaryTable").style.display="none";
-  document.getElementById("totalWinnings").style.display="none";
+  document.getElementById("sortControls").style.display = "none";
+  document.getElementById("summary").style.display = "none";
+  document.getElementById("summaryTable").style.display = "none";
+  document.getElementById("totalWinnings").style.display = "none";
 }
 
 function renderTable(withHighlight=false){
@@ -395,7 +384,6 @@ function renderTable(withHighlight=false){
       });
     }
   } else {
-    // plain listing (no highlights)
     tickets.forEach(t=>{
       t.lines.forEach((line,i)=>{
         results.push({ticketId:t.id,lineNo:i+1,numbers:line,category:null,hasBonus:false,matchCount:0});
@@ -526,10 +514,12 @@ function maybeApplyFromInputs(){
     }else{
       buildWinningTop(false);
       renderTable(false);
+      hideSummary();
     }
   }else{
     buildWinningTop(false);
     renderTable(false);
+    hideSummary(); // ensure hidden until ≥2 mains
   }
 
   document.getElementById("toggleSort").addEventListener("click",()=>{
@@ -542,10 +532,6 @@ function maybeApplyFromInputs(){
     }
     renderTable(!!lastResults.length);
   });
-
-  if(!mainNums.length){
-    hideSummary();
-  }
 })();
 </script>
 </body>
