@@ -57,7 +57,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.5.0 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.5.1 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 
@@ -197,9 +197,77 @@ let sortMode="matches";
 let mainNums=[];   // will be set by URL draw or live inputs
 let bonus=null;
 
+// ---------------- Input helpers (keyboard niceties) ----------------
+function clampValid(val){
+  if(val==="" || val==null) return "";
+  let n=parseInt(val,10);
+  if(Number.isNaN(n)) return "";
+  if(n<1) n=1;
+  if(n>59) n=59;
+  return String(n).padStart(2,"0");
+}
+
+function attachInputHandlers(inp, index, totalInputs){
+  // Allow only digits; clamp on blur; auto-advance after 2 digits; backspace nav; arrows
+  inp.addEventListener("beforeinput", (e)=>{
+    if(e.inputType==="insertText" && /\D/.test(e.data)) e.preventDefault();
+  });
+
+  inp.addEventListener("input",(e)=>{
+    let v=e.target.value.replace(/\D/g,"").slice(0,2);
+    e.target.value=v;
+    if(v.length===2){
+      const n=parseInt(v,10);
+      if(n<1 || n>59){ e.target.value=""; return; }
+      // auto-advance
+      const all = document.querySelectorAll('#winningNums input');
+      const next = all[index+1];
+      if(next) next.focus();
+    }
+    maybeApplyFromInputs(); // live update
+  });
+
+  inp.addEventListener("keydown",(e)=>{
+    const all = document.querySelectorAll('#winningNums input');
+    const i=index;
+    if(e.key==="ArrowLeft"){
+      e.preventDefault();
+      if(i>0) all[i-1].focus();
+    }else if(e.key==="ArrowRight"){
+      e.preventDefault();
+      if(i<totalInputs-1) all[i+1].focus();
+    }else if(e.key==="Backspace"){
+      const val=e.target.value;
+      if(val.length>0){
+        // normal deletion, let input event handle update
+        return;
+      }else{
+        // empty: move to previous and clear it
+        if(i>0){
+          e.preventDefault();
+          const prev=all[i-1];
+          prev.focus();
+          prev.value="";
+          maybeApplyFromInputs();
+        }
+      }
+    }
+  });
+
+  inp.addEventListener("blur",(e)=>{
+    // Format to 2-digits if valid
+    const v=e.target.value.trim();
+    if(v){
+      const clamped=clampValid(v);
+      e.target.value=clamped;
+      maybeApplyFromInputs();
+    }
+  });
+}
+
 // ---------------- UI builders ----------------
 function buildInputsRow(numsDiv){
-  // 6 mains
+  const inputs=[];
   for(let i=0;i<6;i++){
     const wrap=document.createElement("span");
     wrap.className="num";
@@ -209,19 +277,10 @@ function buildInputsRow(numsDiv){
     inp.placeholder="--";
     inp.maxLength=2;
     inp.dataset.kind="main";
-    inp.addEventListener("input",(e)=>{
-      e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
-      const v=e.target.value;
-      if(v.length===2){
-        const n=parseInt(v,10);
-        if(n<1 || n>59){ e.target.value=""; }
-      }
-      maybeApplyFromInputs();
-    });
     wrap.appendChild(inp);
     numsDiv.appendChild(wrap);
+    inputs.push(inp);
   }
-  // bonus
   const wrapB=document.createElement("span");
   wrapB.className="num";
   const inpB=document.createElement("input");
@@ -230,17 +289,12 @@ function buildInputsRow(numsDiv){
   inpB.placeholder="BB";
   inpB.maxLength=2;
   inpB.dataset.kind="bonus";
-  inpB.addEventListener("input",(e)=>{
-    e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
-    const v=e.target.value;
-    if(v.length===2){
-      const n=parseInt(v,10);
-      if(n<1 || n>59){ e.target.value=""; }
-    }
-    maybeApplyFromInputs();
-  });
   wrapB.appendChild(inpB);
   numsDiv.appendChild(wrapB);
+  inputs.push(inpB);
+
+  // Attach keyboard niceties
+  inputs.forEach((el, idx)=>attachInputHandlers(el, idx, inputs.length));
 }
 
 function buildWinningTop(drawProvided){
@@ -277,7 +331,7 @@ function buildWinningTop(drawProvided){
       numsDiv.appendChild(b);
     }
   } else {
-    // Editable inputs
+    // Editable inputs with niceties
     buildInputsRow(numsDiv);
   }
 
@@ -448,14 +502,12 @@ function readInputs(){
 
 function maybeApplyFromInputs(){
   const {mains, bonus:b} = readInputs();
-  // If fewer than 2 mains -> hide summary & remove highlights
   if(mains.length < 2){
     mainNums=[]; bonus=null; lastResults=[];
     hideSummary();
     renderTable(false);
     return;
   }
-  // With >=2 mains -> compute highlights/summary with current set (even if <6)
   mainNums=mains.slice(0,6);
   bonus=b ?? null;
   renderResultsAndSummary();
@@ -463,7 +515,6 @@ function maybeApplyFromInputs(){
 
 // ---------------- Main ----------------
 (function init(){
-  // Build top section
   const drawParam=params.get("draw");
   if(drawParam){
     const arr=drawParam.split(/[ ,]+/).map(x=>parseInt(x,10));
@@ -481,7 +532,6 @@ function maybeApplyFromInputs(){
     renderTable(false);
   }
 
-  // Sort toggle
   document.getElementById("toggleSort").addEventListener("click",()=>{
     if(sortMode==="matches"){
       sortMode="ticket";
@@ -490,15 +540,11 @@ function maybeApplyFromInputs(){
       sortMode="matches";
       document.getElementById("toggleSort").textContent="Sort by Ticket/Line";
     }
-    // Keep current highlight state
     renderTable(!!lastResults.length);
   });
 
-  // Initial hide if we don't have at least 2 mains
   if(!mainNums.length){
     hideSummary();
-  }else{
-    // If draw param provided, summary is already shown in renderResultsAndSummary
   }
 })();
 </script>
