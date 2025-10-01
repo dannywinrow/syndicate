@@ -18,6 +18,12 @@
     border:1px solid #ddd;
     margin:2px;font-weight:600;
   }
+  .num input{
+    width:100%;height:100%;
+    border:none;outline:0;text-align:center;
+    font-weight:700;background:transparent;
+    font-size:14px;
+  }
   .matchMain{background:#ffeb3b}
   .matchBonus{background:#f44336;color:#fff}
   .matchBonusDim{background:rgba(244,67,54,0.12);color:#000}
@@ -33,13 +39,15 @@
   #winningDisplay{margin:20px 0;text-align:center;}
   #winningDisplay h2{margin-bottom:6px;}
   #winningDisplay .drawDate{color:#666;font-size:14px;margin:-4px 0 12px;}
-  #winningNums{display:flex;justify-content:center;flex-wrap:wrap;}
-  #summary{margin:15px 0;font-weight:bold}
-  #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;}
+  #winningNums{display:flex;justify-content:center;flex-wrap:wrap;gap:2px;}
+  #winningActions{margin-top:8px}
+  #summary{margin:15px 0;font-weight:bold;display:none}
+  #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;display:none}
   #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
-  #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold}
-  #sortControls{margin:10px 0;}
+  #totalWinnings{margin-top:10px;font-size:16px;font-weight:bold;display:none}
+  #sortControls{margin:10px 0;display:none}
   button{padding:6px 10px;margin:2px;border:1px solid #ccc;border-radius:6px;cursor:pointer;background:#fafafa;}
+  .hint{color:#666;font-size:12px;margin-top:6px}
   @media(max-width:640px){
     .num{width:28px;height:28px;line-height:28px;font-size:13px;margin:1px;}
     td,th{font-size:12px;padding:3px}
@@ -50,9 +58,10 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.7 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.4.9 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
+
 <div id="summary"></div>
 <table id="summaryTable"></table>
 <div id="totalWinnings"></div>
@@ -152,7 +161,7 @@ function lineLabel(ticketId, lineNo, totalTickets){
   return `${ticketId}:${linePart}`;
 }
 
-// ---------------- Date formatter ----------------
+// ---------------- Date helpers ----------------
 function formatDate(str){
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
   if(isoMatch){
@@ -165,44 +174,205 @@ function formatDate(str){
   return str;
 }
 
-// ---------------- Main rendering ----------------
-let lastResults=[], sortMode="matches", mainNums=[], bonus=null;
+function autoDateFromF(ticketsParam){
+  const fMatch = ticketsParam.match(/F(\d{3,4})/i);
+  if(!fMatch) return null;
+  const fVal = parseInt(fMatch[1],10);
+  const anchorF = 3102;
+  const anchorDate = new Date(Date.UTC(2025,8,13)); // 13 Sep 2025
+  const diff = fVal - anchorF;
+  const daysOffset = diff * 3.5; // 2 draws/week
+  const estDate = new Date(anchorDate.getTime() + daysOffset*86400000);
+  return estDate.toISOString().slice(0,10);
+}
 
-function renderResults(tickets,mainNums,bonus){
+// ---------------- State ----------------
+const params=new URLSearchParams(location.search);
+let tickets=[];
+let autoDate=null;
+if(params.get("t")){
+  tickets=decodeCompactTickets(params.get("t"));
+}else if(params.get("tickets")){
+  const raw=params.get("tickets");
+  tickets=parseTickets(raw);
+  autoDate=autoDateFromF(raw);
+}
+if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
+
+let lastResults=[];
+let sortMode="matches";
+let mainNums=[];   // empty until user applies
+let bonus=null;
+
+// ---------------- Rendering ----------------
+function buildWinningTop(drawProvided){
+  const disp=document.getElementById("winningDisplay");
+  disp.innerHTML="";
+
+  const heading=document.createElement("h2");
+  heading.textContent="Winning Numbers";
+  disp.appendChild(heading);
+
+  // date line (from &date or inferred F####)
+  const dateText = params.get("date") || (drawProvided ? (params.get("tickets") ? autoDate : null) : (params.get("tickets") ? autoDate : null));
+  if(dateText){
+    const dateP=document.createElement("p");
+    dateP.className="drawDate";
+    dateP.textContent="Draw Date: "+formatDate(dateText);
+    disp.appendChild(dateP);
+  }
+
+  const numsDiv=document.createElement("div");
+  numsDiv.id="winningNums";
+
+  if(drawProvided){
+    // Show fixed balls
+    mainNums.forEach(n=>{
+      const s=document.createElement("span");
+      s.className="num drawnum";
+      s.textContent=String(n).padStart(2,"0");
+      numsDiv.appendChild(s);
+    });
+    if(bonus!=null){
+      const b=document.createElement("span");
+      b.className="num bonus";
+      b.textContent=String(bonus).padStart(2,"0");
+      numsDiv.appendChild(b);
+    }
+  }else{
+    // Show 6+1 input "balls"
+    for(let i=0;i<6;i++){
+      const wrap=document.createElement("span");
+      wrap.className="num";
+      const inp=document.createElement("input");
+      inp.type="text";
+      inp.inputMode="numeric";
+      inp.placeholder="--";
+      inp.maxLength=2;
+      inp.dataset.kind="main";
+      inp.addEventListener("input",e=>{
+        // keep digits only, clamp 1..59
+        e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
+        const v=e.target.value;
+        if(v.length===2){
+          const n=parseInt(v,10);
+          if(n<1 || n>59){ e.target.value=""; return; }
+          // auto-advance
+          const next = e.target.closest("#winningNums").querySelectorAll("input")[i+1];
+          if(next) next.focus();
+        }
+      });
+      wrap.appendChild(inp);
+      numsDiv.appendChild(wrap);
+    }
+    const wrapB=document.createElement("span");
+    wrapB.className="num";
+    const inpB=document.createElement("input");
+    inpB.type="text";
+    inpB.inputMode="numeric";
+    inpB.placeholder="BB";
+    inpB.maxLength=2;
+    inpB.dataset.kind="bonus";
+    inpB.addEventListener("input",e=>{
+      e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
+      const v=e.target.value;
+      if(v.length===2){
+        const n=parseInt(v,10);
+        if(n<1 || n>59){ e.target.value=""; return; }
+      }
+    });
+    wrapB.appendChild(inpB);
+    numsDiv.appendChild(wrapB);
+
+    const actions=document.createElement("div");
+    actions.id="winningActions";
+    const applyBtn=document.createElement("button");
+    applyBtn.textContent="Apply numbers";
+    applyBtn.addEventListener("click",()=>{
+      const inputs=[...numsDiv.querySelectorAll('input[data-kind="main"]')];
+      const mains=inputs.map(i=>i.value.trim()).filter(Boolean).map(x=>parseInt(x,10));
+      if(mains.length<6){ alert("Please enter 6 main numbers (1–59)."); return; }
+      const bonusInp=numsDiv.querySelector('input[data-kind="bonus"]');
+      const bVal=bonusInp.value.trim(); // optional
+      if(mains.some(n=>n<1||n>59||Number.isNaN(n))){ alert("Main numbers must be between 1 and 59."); return; }
+      if(bVal && (parseInt(bVal,10)<1 || parseInt(bVal,10)>59)){ alert("Bonus must be 1–59."); return; }
+      mainNums=mains.slice(0,6);
+      bonus=bVal?parseInt(bVal,10):null;
+      // re-render top as fixed balls and show results
+      buildWinningTop(true);
+      renderResultsAndSummary();
+    });
+    actions.appendChild(applyBtn);
+
+    const hint=document.createElement("div");
+    hint.className="hint";
+    hint.textContent="Type 6 main numbers and an optional bonus, then press Apply.";
+    actions.appendChild(hint);
+
+    disp.appendChild(numsDiv);
+    disp.appendChild(actions);
+    return; // don't render fixed balls now
+  }
+
+  disp.appendChild(numsDiv);
+}
+
+function renderResultsAndSummary(){
+  // show sort & summary sections
+  document.getElementById("sortControls").style.display="";
+  document.getElementById("summary").style.display="";
+  document.getElementById("summaryTable").style.display="";
+  document.getElementById("totalWinnings").style.display="";
+
+  // compute results then render
   const results=[];
-
   tickets.forEach(t=>{
     t.lines.forEach((line,i)=>{
       let count=0, hasBonus=false;
       line.forEach(n=>{
         if(mainNums.includes(n)) count++;
-        if(n===bonus) hasBonus=true;
+        if(bonus!=null && n===bonus) hasBonus=true;
       });
       let category=count;
       if(count===5 && hasBonus) category="5+Bonus";
       results.push({ticketId:t.id,lineNo:i+1,numbers:line,matchCount:count,hasBonus,category});
     });
   });
-
   lastResults=results;
-  renderTable();
+  renderTable();            // with highlighting
   summarize(results.map(r=>r.category));
 }
 
 function renderTable(){
   const tbody=document.querySelector("#ticketTable tbody");
   tbody.innerHTML="";
-  let results=[...lastResults];
+  const totalTickets = tickets.length;
 
-  if(sortMode==="matches"){
-    const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
-    results.sort((a,b)=>{
-      const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
-      if(rb!==ra) return rb-ra;
-      if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
-      return a.lineNo-b.lineNo;
+  let results;
+  if(lastResults.length){
+    results=[...lastResults];
+    if(sortMode==="matches"){
+      const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
+      results.sort((a,b)=>{
+        const ra=rankMap[a.category]??1, rb=rankMap[b.category]??1;
+        if(rb!==ra) return rb-ra;
+        if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
+        return a.lineNo-b.lineNo;
+      });
+    } else {
+      results.sort((a,b)=>{
+        if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
+        return a.lineNo-b.lineNo;
+      });
+    }
+  }else{
+    // No results yet: render plain ticket lines in ticket/line order, no highlighting
+    results=[];
+    tickets.forEach(t=>{
+      t.lines.forEach((line,i)=>{
+        results.push({ticketId:t.id,lineNo:i+1,numbers:line,category:null,hasBonus:false,matchCount:0});
+      });
     });
-  } else {
     results.sort((a,b)=>{
       if(a.ticketId!==b.ticketId) return a.ticketId-b.ticketId;
       return a.lineNo-b.lineNo;
@@ -214,21 +384,20 @@ function renderTable(){
 
     const tdLine=document.createElement("td");
     tdLine.className="lineNo";
-    tdLine.textContent=lineLabel(
-      r.ticketId,
-      r.lineNo,
-      lastResults.reduce((max,t)=>Math.max(max,t.ticketId),1)
-    );
+    tdLine.textContent=lineLabel(r.ticketId, r.lineNo, totalTickets);
     tr.appendChild(tdLine);
 
     const tdNums=document.createElement("td");
     r.numbers.forEach(n=>{
       const s=document.createElement("span");
       s.className="num";
-      if(mainNums.includes(n)) s.classList.add("matchMain");
-      if(n===bonus){
-        if(r.category==="5+Bonus") s.classList.add("matchBonus");
-        else s.classList.add("matchBonusDim");
+      // Only highlight if we have applied draw numbers
+      if(lastResults.length){
+        if(mainNums.includes(n)) s.classList.add("matchMain");
+        if(bonus!=null && n===bonus){
+          if(r.category==="5+Bonus") s.classList.add("matchBonus");
+          else s.classList.add("matchBonusDim");
+        }
       }
       s.textContent=String(n).padStart(2,"0");
       tdNums.appendChild(s);
@@ -240,6 +409,7 @@ function renderTable(){
 }
 
 function summarize(results){
+  // Show summary table (already made visible in renderResultsAndSummary)
   const counts={}; results.forEach(c=>counts[c]=(counts[c]||0)+1);
   const summaryTable=document.getElementById("summaryTable");
   summaryTable.innerHTML="";
@@ -274,67 +444,64 @@ function summarize(results){
   tr.innerHTML=`<td><b>Total</b></td><td><b>${sumCount}</b></td><td></td><td><b>£${cashTotal.toLocaleString()}</b></td>`;
   tb.appendChild(tr);
   summaryTable.appendChild(thead); summaryTable.appendChild(tb);
+
+  // Totals line text
+  const totalEl=document.getElementById("totalWinnings");
   let totalText="Total winnings: ";
   if(cashTotal>0) totalText+="£"+cashTotal.toLocaleString();
   if(freeTickets>0) totalText+=(cashTotal>0?" and ":"")+freeTickets+" Free Ticket(s)";
   if(cashTotal===0 && freeTickets===0) totalText+="None";
-  document.getElementById("totalWinnings").textContent=totalText;
+  totalEl.textContent=totalText;
 }
 
-// ---------------- Main ----------------
-const params=new URLSearchParams(location.search);
-let tickets=[];
-if(params.get("t")) tickets=decodeCompactTickets(params.get("t"));
-else if(params.get("tickets")) tickets=parseTickets(params.get("tickets"));
-
-if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
-
-const draw=params.get("draw");
-if(draw){
-  const arr=draw.split(/[ ,]+/).map(x=>parseInt(x,10));
-  if(arr.length>=6){
-    mainNums=arr.slice(0,6);
-    bonus=(arr.length>=7?arr[6]:null);
-    const disp=document.getElementById("winningDisplay");
-    disp.innerHTML="";
-    const heading=document.createElement("h2");
-    heading.textContent="Winning Numbers";
-    disp.appendChild(heading);
-    if(params.get("date")){
-      const dateP=document.createElement("p");
-      dateP.className="drawDate";
-      dateP.textContent="Draw Date: "+formatDate(params.get("date"));
-      disp.appendChild(dateP);
+// ---------------- Main flow ----------------
+(function init(){
+  // 1) Build the top “Winning Numbers” area
+  const drawParam=params.get("draw");
+  if(drawParam){
+    const arr=drawParam.split(/[ ,]+/).map(x=>parseInt(x,10));
+    if(arr.length>=6){
+      mainNums=arr.slice(0,6);
+      bonus=(arr.length>=7?arr[6]:null);
+      buildWinningTop(true);
+      // 2) Render with results
+      renderResultsAndSummary();
+    }else{
+      buildWinningTop(false);
+      // 2) Render tickets only
+      renderTable();
     }
-    const numsDiv=document.createElement("div");
-    numsDiv.id="winningNums";
-    mainNums.forEach(n=>{
-      const s=document.createElement("span");
-      s.className="num drawnum";
-      s.textContent=String(n).padStart(2,"0");
-      numsDiv.appendChild(s);
-    });
-    if(bonus){
-      const b=document.createElement("span");
-      b.className="num bonus";
-      b.textContent=String(bonus).padStart(2,"0");
-      numsDiv.appendChild(b);
-    }
-    disp.appendChild(numsDiv);
-    renderResults(tickets,mainNums,bonus);
+  }else{
+    // No draw param: show input balls, render tickets only
+    buildWinningTop(false);
+    renderTable();
   }
-}
 
-document.getElementById("toggleSort").addEventListener("click",()=>{
-  if(sortMode==="matches"){
-    sortMode="ticket";
-    document.getElementById("toggleSort").textContent="Sort by Matches";
-  } else {
-    sortMode="matches";
-    document.getElementById("toggleSort").textContent="Sort by Ticket/Line";
+  // 3) Sort toggle
+  document.getElementById("toggleSort").addEventListener("click",()=>{
+    if(sortMode==="matches"){
+      sortMode="ticket";
+      document.getElementById("toggleSort").textContent="Sort by Matches";
+    } else {
+      sortMode="matches";
+      document.getElementById("toggleSort").textContent="Sort by Ticket/Line";
+    }
+    renderTable();
+  });
+
+  // Hide sort/summary if we have no results yet
+  if(!mainNums.length){
+    document.getElementById("sortControls").style.display="none";
+    document.getElementById("summary").style.display="none";
+    document.getElementById("summaryTable").style.display="none";
+    document.getElementById("totalWinnings").style.display="none";
+  }else{
+    document.getElementById("sortControls").style.display="";
+    document.getElementById("summary").style.display="";
+    document.getElementById("summaryTable").style.display="";
+    document.getElementById("totalWinnings").style.display="";
   }
-  renderTable();
-});
+})();
 </script>
 </body>
 </html>
