@@ -40,7 +40,6 @@
   #winningDisplay h2{margin-bottom:6px;}
   #winningDisplay .drawDate{color:#666;font-size:14px;margin:-4px 0 12px;}
   #winningNums{display:flex;justify-content:center;flex-wrap:wrap;gap:2px;}
-  #winningActions{margin-top:8px}
   #summary{margin:15px 0;font-weight:bold;display:none}
   #summaryTable{border-collapse:collapse;margin-bottom:15px;width:100%;display:none}
   #summaryTable th,#summaryTable td{border:1px solid #ccc;padding:4px 8px;text-align:center;}
@@ -58,7 +57,7 @@
 </head>
 <body>
 <h1>Syndicate Lotto Checker</h1>
-<p style="color:#666;font-size:12px;">Version 0.4.9 – 2025-09-14</p>
+<p style="color:#666;font-size:12px;">Version 0.5.0 – 2025-09-14</p>
 
 <div id="winningDisplay"></div>
 
@@ -86,7 +85,6 @@ function base64UrlDecode(str){
   const bin=atob(str);
   return Uint8Array.from(bin,c=>c.charCodeAt(0));
 }
-
 function decodeCompactTickets(t){
   const bytes=base64UrlDecode(t);
   let bitpos=0;
@@ -109,7 +107,6 @@ function decodeCompactTickets(t){
   }
   return [{id:1,lines}];
 }
-
 function parseTickets(str){
   if(!str) return [];
   return str.split(";").filter(x=>x && x!=="0").map((chunk,idx)=>{
@@ -137,7 +134,6 @@ let prizeTable={
   "5+Bonus":{label:"5 + Bonus",prize:"£1,000,000",value:1000000},
   6:{label:"6",prize:"Jackpot!",value:null}
 };
-
 function parseCustomPrizes(p){
   const out={...prizeTable};
   p.split(";").forEach(entry=>{
@@ -153,15 +149,13 @@ function parseCustomPrizes(p){
   return out;
 }
 
-// ---------------- Label helper ----------------
+// ---------------- Label + Date helpers ----------------
 function lineLabel(ticketId, lineNo, totalTickets){
   const letters=["A","B","C","D","E","F","G"];
   const linePart=(lineNo<=7 ? letters[lineNo-1] : String(lineNo));
   if(totalTickets===1) return linePart;
   return `${ticketId}:${linePart}`;
 }
-
-// ---------------- Date helpers ----------------
 function formatDate(str){
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
   if(isoMatch){
@@ -173,7 +167,6 @@ function formatDate(str){
   }
   return str;
 }
-
 function autoDateFromF(ticketsParam){
   const fMatch = ticketsParam.match(/F(\d{3,4})/i);
   if(!fMatch) return null;
@@ -201,10 +194,55 @@ if(params.get("p")) prizeTable=parseCustomPrizes(params.get("p"));
 
 let lastResults=[];
 let sortMode="matches";
-let mainNums=[];   // empty until user applies
+let mainNums=[];   // will be set by URL draw or live inputs
 let bonus=null;
 
-// ---------------- Rendering ----------------
+// ---------------- UI builders ----------------
+function buildInputsRow(numsDiv){
+  // 6 mains
+  for(let i=0;i<6;i++){
+    const wrap=document.createElement("span");
+    wrap.className="num";
+    const inp=document.createElement("input");
+    inp.type="text";
+    inp.inputMode="numeric";
+    inp.placeholder="--";
+    inp.maxLength=2;
+    inp.dataset.kind="main";
+    inp.addEventListener("input",(e)=>{
+      e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
+      const v=e.target.value;
+      if(v.length===2){
+        const n=parseInt(v,10);
+        if(n<1 || n>59){ e.target.value=""; }
+      }
+      maybeApplyFromInputs();
+    });
+    wrap.appendChild(inp);
+    numsDiv.appendChild(wrap);
+  }
+  // bonus
+  const wrapB=document.createElement("span");
+  wrapB.className="num";
+  const inpB=document.createElement("input");
+  inpB.type="text";
+  inpB.inputMode="numeric";
+  inpB.placeholder="BB";
+  inpB.maxLength=2;
+  inpB.dataset.kind="bonus";
+  inpB.addEventListener("input",(e)=>{
+    e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
+    const v=e.target.value;
+    if(v.length===2){
+      const n=parseInt(v,10);
+      if(n<1 || n>59){ e.target.value=""; }
+    }
+    maybeApplyFromInputs();
+  });
+  wrapB.appendChild(inpB);
+  numsDiv.appendChild(wrapB);
+}
+
 function buildWinningTop(drawProvided){
   const disp=document.getElementById("winningDisplay");
   disp.innerHTML="";
@@ -213,8 +251,7 @@ function buildWinningTop(drawProvided){
   heading.textContent="Winning Numbers";
   disp.appendChild(heading);
 
-  // date line (from &date or inferred F####)
-  const dateText = params.get("date") || (drawProvided ? (params.get("tickets") ? autoDate : null) : (params.get("tickets") ? autoDate : null));
+  const dateText = params.get("date") || (params.get("tickets") ? autoDate : null);
   if(dateText){
     const dateP=document.createElement("p");
     dateP.className="drawDate";
@@ -226,7 +263,7 @@ function buildWinningTop(drawProvided){
   numsDiv.id="winningNums";
 
   if(drawProvided){
-    // Show fixed balls
+    // Fixed balls
     mainNums.forEach(n=>{
       const s=document.createElement("span");
       s.className="num drawnum";
@@ -239,84 +276,15 @@ function buildWinningTop(drawProvided){
       b.textContent=String(bonus).padStart(2,"0");
       numsDiv.appendChild(b);
     }
-  }else{
-    // Show 6+1 input "balls"
-    for(let i=0;i<6;i++){
-      const wrap=document.createElement("span");
-      wrap.className="num";
-      const inp=document.createElement("input");
-      inp.type="text";
-      inp.inputMode="numeric";
-      inp.placeholder="--";
-      inp.maxLength=2;
-      inp.dataset.kind="main";
-      inp.addEventListener("input",e=>{
-        // keep digits only, clamp 1..59
-        e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
-        const v=e.target.value;
-        if(v.length===2){
-          const n=parseInt(v,10);
-          if(n<1 || n>59){ e.target.value=""; return; }
-          // auto-advance
-          const next = e.target.closest("#winningNums").querySelectorAll("input")[i+1];
-          if(next) next.focus();
-        }
-      });
-      wrap.appendChild(inp);
-      numsDiv.appendChild(wrap);
-    }
-    const wrapB=document.createElement("span");
-    wrapB.className="num";
-    const inpB=document.createElement("input");
-    inpB.type="text";
-    inpB.inputMode="numeric";
-    inpB.placeholder="BB";
-    inpB.maxLength=2;
-    inpB.dataset.kind="bonus";
-    inpB.addEventListener("input",e=>{
-      e.target.value=e.target.value.replace(/\D/g,"").slice(0,2);
-      const v=e.target.value;
-      if(v.length===2){
-        const n=parseInt(v,10);
-        if(n<1 || n>59){ e.target.value=""; return; }
-      }
-    });
-    wrapB.appendChild(inpB);
-    numsDiv.appendChild(wrapB);
-
-    const actions=document.createElement("div");
-    actions.id="winningActions";
-    const applyBtn=document.createElement("button");
-    applyBtn.textContent="Apply numbers";
-    applyBtn.addEventListener("click",()=>{
-      const inputs=[...numsDiv.querySelectorAll('input[data-kind="main"]')];
-      const mains=inputs.map(i=>i.value.trim()).filter(Boolean).map(x=>parseInt(x,10));
-      if(mains.length<6){ alert("Please enter 6 main numbers (1–59)."); return; }
-      const bonusInp=numsDiv.querySelector('input[data-kind="bonus"]');
-      const bVal=bonusInp.value.trim(); // optional
-      if(mains.some(n=>n<1||n>59||Number.isNaN(n))){ alert("Main numbers must be between 1 and 59."); return; }
-      if(bVal && (parseInt(bVal,10)<1 || parseInt(bVal,10)>59)){ alert("Bonus must be 1–59."); return; }
-      mainNums=mains.slice(0,6);
-      bonus=bVal?parseInt(bVal,10):null;
-      // re-render top as fixed balls and show results
-      buildWinningTop(true);
-      renderResultsAndSummary();
-    });
-    actions.appendChild(applyBtn);
-
-    const hint=document.createElement("div");
-    hint.className="hint";
-    hint.textContent="Type 6 main numbers and an optional bonus, then press Apply.";
-    actions.appendChild(hint);
-
-    disp.appendChild(numsDiv);
-    disp.appendChild(actions);
-    return; // don't render fixed balls now
+  } else {
+    // Editable inputs
+    buildInputsRow(numsDiv);
   }
 
   disp.appendChild(numsDiv);
 }
 
+// ---------------- Rendering ----------------
 function renderResultsAndSummary(){
   // show sort & summary sections
   document.getElementById("sortControls").style.display="";
@@ -339,17 +307,24 @@ function renderResultsAndSummary(){
     });
   });
   lastResults=results;
-  renderTable();            // with highlighting
+  renderTable(true);            // with highlighting
   summarize(results.map(r=>r.category));
 }
 
-function renderTable(){
+function hideSummary(){
+  document.getElementById("sortControls").style.display="none";
+  document.getElementById("summary").style.display="none";
+  document.getElementById("summaryTable").style.display="none";
+  document.getElementById("totalWinnings").style.display="none";
+}
+
+function renderTable(withHighlight=false){
   const tbody=document.querySelector("#ticketTable tbody");
   tbody.innerHTML="";
   const totalTickets = tickets.length;
 
-  let results;
-  if(lastResults.length){
+  let results=[];
+  if(withHighlight && lastResults.length){
     results=[...lastResults];
     if(sortMode==="matches"){
       const rankMap = {6:8,"5+Bonus":7,5:6,4:5,3:4,2:3,1:2,0:1};
@@ -365,9 +340,8 @@ function renderTable(){
         return a.lineNo-b.lineNo;
       });
     }
-  }else{
-    // No results yet: render plain ticket lines in ticket/line order, no highlighting
-    results=[];
+  } else {
+    // plain listing (no highlights)
     tickets.forEach(t=>{
       t.lines.forEach((line,i)=>{
         results.push({ticketId:t.id,lineNo:i+1,numbers:line,category:null,hasBonus:false,matchCount:0});
@@ -391,8 +365,7 @@ function renderTable(){
     r.numbers.forEach(n=>{
       const s=document.createElement("span");
       s.className="num";
-      // Only highlight if we have applied draw numbers
-      if(lastResults.length){
+      if(withHighlight && lastResults.length){
         if(mainNums.includes(n)) s.classList.add("matchMain");
         if(bonus!=null && n===bonus){
           if(r.category==="5+Bonus") s.classList.add("matchBonus");
@@ -409,7 +382,6 @@ function renderTable(){
 }
 
 function summarize(results){
-  // Show summary table (already made visible in renderResultsAndSummary)
   const counts={}; results.forEach(c=>counts[c]=(counts[c]||0)+1);
   const summaryTable=document.getElementById("summaryTable");
   summaryTable.innerHTML="";
@@ -445,7 +417,6 @@ function summarize(results){
   tb.appendChild(tr);
   summaryTable.appendChild(thead); summaryTable.appendChild(tb);
 
-  // Totals line text
   const totalEl=document.getElementById("totalWinnings");
   let totalText="Total winnings: ";
   if(cashTotal>0) totalText+="£"+cashTotal.toLocaleString();
@@ -454,30 +425,63 @@ function summarize(results){
   totalEl.textContent=totalText;
 }
 
-// ---------------- Main flow ----------------
+// ---------------- Live apply from inputs ----------------
+function readInputs(){
+  const container=document.getElementById("winningNums");
+  if(!container) return {mains:[], bonus:null};
+  const mains=[...container.querySelectorAll('input[data-kind="main"]')]
+    .map(i=>i.value.trim())
+    .filter(Boolean)
+    .map(v=>parseInt(v,10))
+    .filter(n=>!Number.isNaN(n) && n>=1 && n<=59);
+  const bEl=container.querySelector('input[data-kind="bonus"]');
+  let b=null;
+  if(bEl){
+    const t=bEl.value.trim();
+    if(t){
+      const nb=parseInt(t,10);
+      if(!Number.isNaN(nb) && nb>=1 && nb<=59) b=nb;
+    }
+  }
+  return {mains, bonus:b};
+}
+
+function maybeApplyFromInputs(){
+  const {mains, bonus:b} = readInputs();
+  // If fewer than 2 mains -> hide summary & remove highlights
+  if(mains.length < 2){
+    mainNums=[]; bonus=null; lastResults=[];
+    hideSummary();
+    renderTable(false);
+    return;
+  }
+  // With >=2 mains -> compute highlights/summary with current set (even if <6)
+  mainNums=mains.slice(0,6);
+  bonus=b ?? null;
+  renderResultsAndSummary();
+}
+
+// ---------------- Main ----------------
 (function init(){
-  // 1) Build the top “Winning Numbers” area
+  // Build top section
   const drawParam=params.get("draw");
   if(drawParam){
     const arr=drawParam.split(/[ ,]+/).map(x=>parseInt(x,10));
-    if(arr.length>=6){
+    if(arr.length>=1){
       mainNums=arr.slice(0,6);
       bonus=(arr.length>=7?arr[6]:null);
       buildWinningTop(true);
-      // 2) Render with results
       renderResultsAndSummary();
     }else{
       buildWinningTop(false);
-      // 2) Render tickets only
-      renderTable();
+      renderTable(false);
     }
   }else{
-    // No draw param: show input balls, render tickets only
     buildWinningTop(false);
-    renderTable();
+    renderTable(false);
   }
 
-  // 3) Sort toggle
+  // Sort toggle
   document.getElementById("toggleSort").addEventListener("click",()=>{
     if(sortMode==="matches"){
       sortMode="ticket";
@@ -486,20 +490,15 @@ function summarize(results){
       sortMode="matches";
       document.getElementById("toggleSort").textContent="Sort by Ticket/Line";
     }
-    renderTable();
+    // Keep current highlight state
+    renderTable(!!lastResults.length);
   });
 
-  // Hide sort/summary if we have no results yet
+  // Initial hide if we don't have at least 2 mains
   if(!mainNums.length){
-    document.getElementById("sortControls").style.display="none";
-    document.getElementById("summary").style.display="none";
-    document.getElementById("summaryTable").style.display="none";
-    document.getElementById("totalWinnings").style.display="none";
+    hideSummary();
   }else{
-    document.getElementById("sortControls").style.display="";
-    document.getElementById("summary").style.display="";
-    document.getElementById("summaryTable").style.display="";
-    document.getElementById("totalWinnings").style.display="";
+    // If draw param provided, summary is already shown in renderResultsAndSummary
   }
 })();
 </script>
