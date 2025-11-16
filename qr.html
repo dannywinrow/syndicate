@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced jsQR Reader for High-Density Codes</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        #video {
+            display: block;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            border: 2px solid #2ecc71;
+            border-radius: 8px;
+        }
+        #canvas {
+            display: none; /* Keep canvas hidden */
+        }
+        #output {
+            margin-top: 20px;
+            font-size: 1.2em;
+            min-height: 50px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #controls {
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>High-Density QR Scanner</h1>
+    <p>Using higher camera resolution should improve scanning of small, dense codes.</p>
+
+    <div id="controls">
+        <label for="resolutionSelect">Select Resolution:</label>
+        <select id="resolutionSelect">
+            <option value="640">Low (640x480)</option>
+            <option value="1280" selected>Medium (1280x720)</option>
+            <option value="1920">High (1920x1080)</option>
+        </select>
+        <button onclick="changeResolution()">Apply</button>
+    </div>
+
+    <video id="video" playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="output">
+        <div id="loadingMessage">Loading camera...</div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // --- JavaScript Code for jsQR with Resolution Control ---
+        const video = document.getElementById("video");
+        const canvasElement = document.getElementById("canvas");
+        const canvas = canvasElement.getContext("2d");
+        const loadingMessage = document.getElementById("loadingMessage");
+        const outputResult = document.getElementById("result");
+        const resolutionSelect = document.getElementById("resolutionSelect");
+        
+        let stream = null;
+        let activeConstraints = { width: 1280, height: 720 };
+
+        // 1. Get Camera Stream with constraints
+        async function startCamera(constraints) {
+            // Stop existing stream if it exists
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+
+            try {
+                // Request access to the video camera with specific constraints
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: constraints.width },
+                        height: { ideal: constraints.height }
+                    } 
+                });
+                
+                video.srcObject = stream;
+                await video.play(); 
+                
+                loadingMessage.innerText = "Scanning for high-density code...";
+                
+                // Clear any previous loop and start a new one
+                requestAnimationFrame(tick);
+
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                loadingMessage.innerText = `Error: Could not access the camera at ${constraints.width}x${constraints.height}. Try a lower resolution.`;
+            }
+        }
+        
+        // Function to handle resolution change from the dropdown
+        function changeResolution() {
+            const res = parseInt(resolutionSelect.value);
+            activeConstraints = { width: res, height: res * (9/16) }; // Maintain 16:9 aspect ratio
+            loadingMessage.innerText = "Switching resolution, please wait...";
+            startCamera(activeConstraints);
+        }
+
+        // 2. The main scanning loop
+        function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                // Set canvas size to the actual video stream size
+                canvasElement.height = video.videoHeight;
+                canvasElement.width = video.videoWidth;
+                
+                // Draw the current video frame onto the canvas
+                canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                
+                // Get the raw image data from the canvas
+                const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+                
+                // Decode the QR code using jsQR
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    // Try to avoid inversion attempts for small, standard codes
+                    inversionAttempts: "dontInvert", 
+                });
+
+                if (code) {
+                    // Success: Code found
+                    handleScanSuccess(code.data);
+                    return; // Exit the loop after a successful scan
+                }
+            }
+            
+            // Continue the loop if no code was found
+            requestAnimationFrame(tick);
+        }
+
+        // 3. Handle a successful scan
+        function handleScanSuccess(data) {
+            outputResult.textContent = `Scanned QR Code: ${data}`;
+            loadingMessage.style.display = 'none';
+            // Stop the camera stream after success
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        // Start the process with the default resolution
+        startCamera(activeConstraints);
+    </script>
+
+</body>
+</html>
