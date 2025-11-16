@@ -37,7 +37,7 @@
 </head>
 <body>
     <h1>Lotto Syndicate – Admin Page</h1>
-    <p style="color:#666;font-size:12px;">Version 0.3.11 – 2025-10-16</p>
+    <p style="color:#666;font-size:12px;">Version 0.3.10 – 2025-10-16</p>
     <p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below. Then add winning numbers (7 numbers including bonus) and optional prizes. You can still generate a shareable URL (to the viewer page), or export to JSON.</p>
 
     <div id="gpuStatus" style="font-size:12px; margin-bottom:5px; opacity:0.7;"></div>
@@ -63,4 +63,340 @@
     <div class="controls">
         <label>Winning numbers (7, last is bonus): <input id="drawInput" size="25" placeholder="01 09 18 27 38 42 11"></label><br>
         <label>Result Date: <input type="date" id="resultDate"></label><br>
-        <label>Prizes: 2=<input id="p2" size="4" placeholder="0"> 3=<input id="p3
+        <label>Prizes: 2=<input id="p2" size="4" placeholder="0"> 3=<input id="p3" size="4" placeholder="30"> 4=<input id="p4" size="4" placeholder="140"> 5=<input id="p5" size="6" placeholder="1750"> 5b=<input id="p5b" size="8" placeholder="1000000"> 6=<input id="p6" size="8" placeholder="7500000"></label><br>
+        <button id="generate" type="button">Generate Shareable Link</button>
+        <button id="shorten" type="button">Shorten via TinyURL</button>
+        <button id="exportJson" type="button">Export JSON</button>
+        <button id="clear" type="button">Clear All</button>
+    </div>
+    <div id="outputLink"></div>
+
+    <script src="//cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+    <script>
+        // --- storage ---
+        let tickets = [];
+
+        // --- helpers: draw date calculation ---
+        const baseF = 3102;
+        const baseDate = new Date(Date.UTC(2025, 8, 13)); // 2025-09-13 Sat
+        function fToDate(fnum) {
+            const diff = fnum - baseF;
+            const days = diff * 3.5;
+            const d = new Date(baseDate.getTime() + days * 86400000);
+            while (d.getUTCDay() !== 3 && d.getUTCDay() !== 6) {
+                d.setUTCDate(d.getUTCDate() + 1);
+            }
+            return d.toISOString().slice(0, 10);
+        }
+
+        // --- ticket handling ---
+        function countLines() {
+            let total = 0;
+            tickets.forEach(t => total += t.lines.length);
+            document.getElementById('lineCount').textContent = 'Total lines scanned: ' + total;
+        }
+
+        function renderLastTicketPreview(ticket) {
+            if (!ticket) { document.getElementById('lastTicketPreview').innerHTML = ''; return; }
+            let html = `<b>Last scanned ticket (${ticket.lines.length} line${ticket.lines.length !== 1 ? 's' : ''}):</b><br>`;
+            ticket.lines.forEach(line => {
+                html += line.map(n => `<span class="num">${String(n).padStart(2, '0')}</span>`).join('') + '<br>';
+            });
+            document.getElementById('lastTicketPreview').innerHTML = html;
+        }
+
+        let lastScannedQR = null; // To prevent adding the same QR multiple times from the continuous scan
+
+        function addTicket(raw) {
+            if (!raw || raw === '0') return;
+            // Prevent adding duplicate QRs that are currently being scanned
+            if (tickets.find(t => t.raw === raw)) {
+                console.log("Duplicate QR code scanned, ignoring:", raw);
+                return; 
+            }
+
+            const mF = raw.match(/F(\d+)/);
+            if (!mF) { console.warn("QR code missing F number:", raw); return; }
+            const fnum = parseInt(mF[1], 10);
+            let numStr = null;
+            const mS = raw.match(/S(\d+)/);
+            if (mS) {
+                numStr = mS[1];
+            } else {
+                const parts = raw.split("/");
+                const tail = parts[parts.length - 1];
+                if (/^[0-9]+$/.test(tail)) numStr = tail;
+            }
+            if (!numStr) { console.warn("QR code missing S number:", raw); return; }
+
+            const lines = [];
+            for (let i = 0; i + 12 <= numStr.length; i += 12) {
+                const row = [];
+                for (let j = 0; j < 12; j += 2) {
+                    row.push(parseInt(numStr.slice(i + j, i + j + 2), 10));
+                }
+                if (row.length === 6) lines.push(row);
+            }
+            
+            if (lines.length === 0) { console.warn("No lines extracted from QR:", raw); return; }
+
+            const drawDates = [fToDate(fnum)];
+            const ticket = { id: tickets.length + 1, raw, lines, drawDates };
+            tickets.unshift(ticket); // newest first
+            renderTickets();
+            renderLastTicketPreview(ticket);
+            document.getElementById('resultDate').value = drawDates[0];
+            lastScannedQR = raw; // Store the last successfully added QR
+        }
+
+        function renderTickets() {
+            const tb = document.querySelector('#ticketTable tbody');
+            tb.innerHTML = '';
+            tickets.forEach((t, i) => {
+                const tr = document.createElement('tr');
+                const linesHtml = t.lines.map(line => line.map(n => `<span class="num">${String(n).padStart(2, '0')}</span>`).join('')).join('<br>');
+                tr.innerHTML = `<td>${i + 1}</td><td>${t.raw}</td><td>${t.lines.length}</td><td>${t.drawDates.join(',')}</td>
+                                  <td><details><summary>View Lines</summary>${linesHtml}</details></td>
+                                  <td><button onclick="removeTicket(${i})">Remove</button></td>`;
+                tb.appendChild(tr);
+            });
+            countLines();
+        }
+
+        function removeTicket(i) {
+            tickets.splice(i, 1);
+            renderTickets();
+        }
+
+        document.getElementById('clear').addEventListener('click', () => {
+            tickets = []; renderTickets(); renderLastTicketPreview(null); document.getElementById('resultDate').value = '';
+        });
+
+        // --- compact encoder ---
+        function base64UrlEncode(bytes) {
+            let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function encodeCompactTickets(lines) {
+            const bits = []; function pushBits(val, n) { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); }
+            pushBits(lines.length, 16);
+            lines.forEach(line => line.forEach(n => pushBits(n - 1, 6)));
+            const bytes = new Uint8Array(Math.ceil(bits.length / 8));
+            bits.forEach((b, i) => { bytes[Math.floor(i / 8)] |= b << (7 - (i % 8)); });
+            return base64UrlEncode(bytes);
+        }
+
+        function collectAllLines() {
+            let allLines = []; tickets.forEach(t => allLines.push(...t.lines)); return allLines;
+        }
+
+        // --- URL generate ---
+        document.getElementById('generate').addEventListener('click', () => {
+            const allLines = collectAllLines();
+            if (allLines.length === 0) { alert('Scan some tickets first!'); return; }
+            const params = new URLSearchParams();
+            const draw = document.getElementById('drawInput').value.trim();
+            if (draw) params.set('draw', draw);
+            const prizeStr = []; const map = { p2: '2', p3: '3', p4: '4', p5: '5', p5b: '5b', p6: '6' };
+            for (const id in map) { const v = document.getElementById(id).value.trim(); if (v) prizeStr.push(map[id] + ":" + v); }
+            if (prizeStr.length) params.set('p', prizeStr.join(';'));
+            const compact = encodeCompactTickets(allLines);
+            params.set('t', compact);
+            const base = location.origin + location.pathname.replace(/index\.html$/, '');
+            const url = base + (base.endsWith('/') ? '' : '/') + 'viewer.html' + '?' + params.toString();
+            document.getElementById('outputLink').innerHTML = `Share this link:<br><a href="${url}" target="_blank">${url}</a><br>Detected <b>${allLines.length}</b> ticket lines.`;
+        });
+
+        // --- TinyURL shorten ---
+        document.getElementById('shorten').addEventListener('click', () => {
+            const linkBox = document.querySelector('#outputLink a');
+            if (!linkBox) { alert('Generate a link first!'); return; }
+            const longUrl = encodeURIComponent(linkBox.href);
+            const tinyUrl = "https://tinyurl.com/create.php?url=" + longUrl;
+            window.open(tinyUrl, '_blank');
+        });
+
+        // --- JSON export ---
+        document.getElementById('exportJson').addEventListener('click', () => {
+            if (tickets.length === 0) { alert('No tickets to export'); return; }
+            const data = { tickets };
+            const drawStr = document.getElementById('drawInput').value.trim();
+            if (drawStr) {
+                const arr = drawStr.split(/[ ,]+/).map(x => parseInt(x, 10));
+                if (arr.length === 7) {
+                    const dateVal = document.getElementById('resultDate').value || 'unknown';
+                    const prizeStr = []; const map = { p2: '2', p3: '3', p4: '4', p5: '5', p5b: '5b', p6: '6' };
+                    for (const id in map) { const v = document.getElementById(id).value.trim(); if (v) prizeStr.push(map[id] + ":" + v); }
+                    data.results = [{ date: dateVal, draw: arr, prizes: prizeStr.join(';') }];
+                }
+            }
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'lotto-tickets.json'; a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        // --- jsQR QR Scanner with CAMERA SELECTOR ---
+        const video = document.getElementById("video");
+        const canvasElement = document.getElementById("canvas");
+        const canvas = canvasElement.getContext("2d", { willReadFrequently: true }); // Important for performance
+        const cameraSelect = document.getElementById("cameraSelect");
+        const scanStatus = document.getElementById("scanStatus"); // New element for status messages
+
+        let currentStream = null;
+        let scanning = false; // Flag to control the scanning loop
+
+        // GPU indicator (safe)
+        (function detectGPU() {
+            const el = document.getElementById("gpuStatus");
+            if (!el) return;
+            try {
+                const gl = document.createElement("canvas").getContext("webgl");
+                el.textContent = gl ? "GPU: Active" : "GPU: Not used";
+            } catch {
+                el.textContent = "GPU: Not used";
+            }
+        })();
+
+        // Define high-resolution constraints based on previous success
+        const HIGH_RES_CONSTRAINTS = {
+            width: { ideal: 1920 }, // Match your original html5-qrcode config
+            height: { ideal: 1080 } // Match your original html5-qrcode config
+        };
+
+        // Scan loop for video frames
+        function tick() {
+            if (currentStream && video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvasElement.height = video.videoHeight;
+                canvasElement.width = video.videoWidth;
+                canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+                const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert", // Often helps with varied lighting
+                });
+
+                if (code) {
+                    // QR code found!
+                    scanStatus.textContent = "QR Code detected! Scanning...";
+                    if (code.data !== lastScannedQR) { // Prevent rapid re-adding of the same QR
+                        addTicket(code.data);
+                    }
+                } else {
+                    scanStatus.textContent = "Scanning for QR code...";
+                }
+            }
+
+            if (scanning) {
+                requestAnimationFrame(tick);
+            }
+        }
+
+        // Stop camera stream
+        function stopCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+            }
+            scanning = false;
+        }
+
+        // Start camera safely with deviceId and high-res constraints
+        async function startCamera(deviceId) {
+            stopCamera(); // Stop any existing stream first
+            scanStatus.textContent = "Starting camera...";
+
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        deviceId: { exact: deviceId },
+                        facingMode: "environment",
+                        ...HIGH_RES_CONSTRAINTS // Apply the high resolution settings
+                    }
+                });
+
+                video.srcObject = currentStream;
+                await video.play();
+
+                scanning = true;
+                requestAnimationFrame(tick); // Start the scanning loop
+
+            } catch (err) {
+                console.error("Camera start failed:", err);
+                scanStatus.textContent = "Error: Could not access camera. " + (err.name === "NotAllowedError" ? "Permissions denied." : "Try a different camera or resolution.");
+            }
+        }
+
+        // Populate dropdown + auto-start
+        Html5Qrcode.getCameras().then(async devices => { // Using Html5Qrcode.getCameras() as a utility for device list
+            cameraSelect.innerHTML = "";
+            if (devices.length === 0) {
+                scanStatus.textContent = "No cameras found.";
+                return;
+            }
+
+            devices.forEach(d => {
+                const opt = document.createElement("option");
+                opt.value = d.id;
+                opt.textContent = d.label || `Camera ${cameraSelect.length + 1}`;
+                cameraSelect.appendChild(opt);
+            });
+
+            // Auto pick telephoto if it exists (using the same logic)
+            const tele = devices.find(d => /tele|zoom|back.*2|camera.*2|aux/i.test(d.label));
+            const initialId = tele ? tele.id : devices[0].id;
+            cameraSelect.value = initialId;
+
+            cameraSelect.addEventListener("change", (e) => startCamera(e.target.value));
+
+            // Start the initially selected camera
+            startCamera(initialId);
+        }).catch(err => {
+            console.error("Camera detection error:", err);
+            scanStatus.textContent = "Error detecting cameras.";
+        });
+
+        // File upload using jsQR
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            if (!e.target.files.length) return;
+            const file = e.target.files[0];
+
+            scanStatus.textContent = "Processing image...";
+            stopCamera(); // Stop live scanning while processing file
+
+            const img = new Image();
+            img.onload = () => {
+                canvasElement.width = img.width;
+                canvasElement.height = img.height;
+                canvas.drawImage(img, 0, 0, img.width, img.height);
+                const imageData = canvas.getImageData(0, 0, img.width, img.height);
+
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+
+                if (code) {
+                    addTicket(code.data);
+                    scanStatus.textContent = "Image scan successful!";
+                } else {
+                    scanStatus.textContent = "No QR code found in image.";
+                    alert("QR scan failed: No QR code detected in the image.");
+                }
+
+                // Restart live camera after image scan
+                startCamera(cameraSelect.value);
+            };
+            img.onerror = (err) => {
+                scanStatus.textContent = "Error loading image.";
+                alert("Error loading image: " + err.message);
+                startCamera(cameraSelect.value); // Restart camera on error
+            };
+            img.src = URL.createObjectURL(file);
+        });
+    </script>
+</body>
+</html>
