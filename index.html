@@ -21,12 +21,13 @@
 </head>
 <body>
 <h1>Lotto Syndicate – Admin Page</h1>
-<p style="color:#666;font-size:12px;">Version 0.3.8 – 2025-10-16</p>
+<p style="color:#666;font-size:12px;">Version 0.3.9 – 2025-10-16</p>
 
 <p>Scan ticket QR codes using your device camera or upload an image. Each scan will be added below. Then add winning numbers (7 numbers including bonus) and optional prizes. You can still generate a shareable URL (to the viewer page), or export to JSON.</p>
 
 <div id="gpuStatus" style="font-size:12px; margin-bottom:5px; opacity:0.7;"></div>
 <div id="reader"></div>
+<select id="cameraSelect"></select>
 <div id="lineCount"></div>
 <div id="lastTicketPreview"></div>
 
@@ -205,105 +206,105 @@ document.getElementById('exportJson').addEventListener('click',()=>{
   URL.revokeObjectURL(url);
 });
 
-// --- QR Scanner (improved further for SMALL QR codes + GPU indicator + telephoto lens) ---
+// --- QR Scanner with CAMERA SELECTOR ---
 
 const html5QrCode = new Html5Qrcode('reader');
+let currentCameraId = null;
 
-// Show GPU status
-const gpuStatusEl = document.getElementById("gpuStatus"); 
-if (gpuStatusEl) gpuStatusEl.textContent = "GPU: checking…";
-
-// Try to detect GPU availability via WebGL
-function detectGPU() {
+// GPU indicator (safe)
+(function detectGPU() {
+  const el = document.getElementById("gpuStatus");
+  if (!el) return;
   try {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-    if (!gl) {
-      gpuStatusEl.textContent = "GPU: Not used";
-      return false;
-    }
-    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-    const gpuName = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "GPU detected";
-    gpuStatusEl.textContent = "GPU: Active (" + gpuName + ")";
-    return true;
+    const gl = document.createElement("canvas").getContext("webgl");
+    el.textContent = gl ? "GPU: Active" : "GPU: Not used";
   } catch {
-    gpuStatusEl.textContent = "GPU: Not used";
-    return false;
+    el.textContent = "GPU: Not used";
   }
-}
-detectGPU();
+})();
 
-document.getElementById("reader").style.minHeight = "260px";
+document.getElementById("reader").style.minHeight = "240px";
 
-// --- MAXIMUM small-QR enhancements ---
+// --- SAFE QR config ---
 const qrConfig = {
-  fps: 12,
+  fps: 10,
   qrbox: undefined,
   disableFlip: true,
   willReadFrequently: true,
-  experimentalFeatures: {
-    useBarCodeDetectorIfSupported: true
-  },
   videoConstraints: {
     facingMode: "environment",
-    width: { ideal: 2560 },   // PUSH HIGHER
-    height: { ideal: 1440 },
-    zoom: 5                   // Use digital zoom by default (helps tiny QR)
+    width: { ideal: 1920 },
+    height: { ideal: 1080 }
   }
 };
 
-// Choose telephoto lens when available
-function pickBestCamera(devices) {
-  const tele = devices.find(d =>
-    /tele|zoom/i.test(d.label) ||
-    d.label.toLowerCase().includes("back") && d.label.toLowerCase().includes("camera 2")
-  );
-  return tele ? { deviceId: { exact: tele.id } } : { facingMode: "environment" };
+function onScanSuccess(decodedText) {
+  if (!tickets.find(t => t.raw === decodedText)) addTicket(decodedText);
 }
 
-function onScanSuccess(decodedText) {
-  if (!tickets.find(t => t.raw === decodedText)) {
-    addTicket(decodedText);
+// Pick telephoto if it exists
+function findTelephoto(devices) {
+  return devices.find(d =>
+    /tele|zoom|back.*2|camera.*2|aux/i.test(d.label)
+  );
+}
+
+// Start camera safely
+async function startCamera(deviceId) {
+  try {
+    if (html5QrCode._isScanning) {
+      await html5QrCode.stop();
+    }
+    await html5QrCode.start(
+      { deviceId: { exact: deviceId } },
+      qrConfig,
+      onScanSuccess
+    );
+    currentCameraId = deviceId;
+  } catch (err) {
+    console.warn("Camera start failed:", err);
   }
 }
 
-// Fetch cameras
-Html5Qrcode.getCameras()
-  .then(devices => {
-    if (!devices || !devices.length) {
-      console.error("No cameras found");
-      return;
-    }
+// Populate dropdown + auto-start
+Html5Qrcode.getCameras().then(async devices => {
+  const sel = document.getElementById("cameraSelect");
+  sel.innerHTML = "";
 
-    // Select telephoto if available
-    const chosenCam = pickBestCamera(devices);
+  devices.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d.id;
+    opt.textContent = d.label || `Camera ${sel.length + 1}`;
+    sel.appendChild(opt);
+  });
 
-    html5QrCode.start(
-      chosenCam,
-      qrConfig,
-      onScanSuccess,
-      error => {} // suppress spammy decode errors
-    )
-    .then(() => {
-      gpuStatusEl.textContent += " | QR scanner running";
-    })
-    .catch(err => console.error("Camera start failed:", err));
-  })
-  .catch(err => console.error("Camera detection error:", err));
+  // Auto pick telephoto if it exists
+  const tele = findTelephoto(devices);
+  const initialId = tele ? tele.id : devices[0].id;
 
+  sel.value = initialId;
 
-// File upload scanning unchanged
+  sel.addEventListener("change", e => {
+    const camId = e.target.value;
+    startCamera(camId);
+  });
+
+  // Start the initially selected camera
+  startCamera(initialId);
+}).catch(err => {
+  console.error("Camera detection error:", err);
+});
+
+// File upload unchanged
 document.getElementById('fileInput').addEventListener('change', e => {
-  if (e.target.files.length === 0) return;
+  if (!e.target.files.length) return;
   const file = e.target.files[0];
-  html5QrCode
-    .scanFile(file, true)
+  html5QrCode.scanFile(file, true)
     .then(decodedText => {
       if (!tickets.find(t => t.raw === decodedText)) addTicket(decodedText);
     })
-    .catch(err => alert('QR scan failed: ' + err));
+    .catch(err => alert("QR scan failed: " + err));
 });
-
 
 </script>
 </body>
