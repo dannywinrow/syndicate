@@ -204,19 +204,65 @@ document.getElementById('exportJson').addEventListener('click',()=>{
   URL.revokeObjectURL(url);
 });
 
-// --- QR Scanner ---
-function onScanSuccess(decodedText){ if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); }
-Html5Qrcode.getCameras().then(devices => {
-  if(devices && devices.length) {
-    html5QrCode.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 }, onScanSuccess);
+// --- QR Scanner (improved for SMALL QR codes) ---
+
+document.getElementById("reader").style.minHeight = "240px";
+
+/*
+  SETTINGS FOR SMALL / LOW-RES QR CODES:
+
+  • qrbox: undefined     → entire frame examined (critical for tiny QR codes)
+  • disableFlip: true    → speeds up decode and stabilises sharpness
+  • willReadFrequently   → keeps camera buffer hot for small QR
+  • experimentalFeatures → force the newer barcode detector when supported
+*/
+const qrConfig = {
+  fps: 10,
+  qrbox: undefined,   // analyse whole frame
+  disableFlip: true,
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: true   // higher precision path
+  },
+  videoConstraints: {
+    facingMode: "environment",
+    width: { ideal: 1920 },  // highest possible resolution
+    height: { ideal: 1080 }
   }
-}).catch(err=>console.error(err));
+};
+
+function onScanSuccess(decodedText) {
+  if (!tickets.find(t => t.raw === decodedText)) {
+    addTicket(decodedText);
+  }
+}
+
+Html5Qrcode.getCameras()
+  .then(devices => {
+    if (devices && devices.length) {
+      html5QrCode.start(
+        { facingMode: "environment" }, // camera selector
+        qrConfig,
+        onScanSuccess
+      ).catch(err => console.error("Camera start failed:", err));
+    } else {
+      console.error("No cameras found");
+    }
+  })
+  .catch(err => console.error("Camera detection error:", err));
+
+// File upload scanning remains same
 document.getElementById('fileInput').addEventListener('change', e => {
   if (e.target.files.length === 0) return;
   const file = e.target.files[0];
-  html5QrCode.scanFile(file, true).then(decodedText => { if(!tickets.find(t=>t.raw===decodedText)) addTicket(decodedText); })
+  html5QrCode
+    .scanFile(file, true)
+    .then(decodedText => {
+      if (!tickets.find(t => t.raw === decodedText)) addTicket(decodedText);
+    })
     .catch(err => alert('QR scan failed: ' + err));
 });
+
+
 </script>
 </body>
 </html>
