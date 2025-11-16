@@ -54,7 +54,7 @@
 <script>
 // --- storage ---
 let tickets = [];
-const html5QrCode = new Html5Qrcode('reader');
+
 
 // --- helpers: draw date calculation ---
 const baseF=3102;
@@ -204,31 +204,61 @@ document.getElementById('exportJson').addEventListener('click',()=>{
   URL.revokeObjectURL(url);
 });
 
-// --- QR Scanner (improved for SMALL QR codes) ---
+// --- QR Scanner (improved further for SMALL QR codes + GPU indicator + telephoto lens) ---
 
-document.getElementById("reader").style.minHeight = "240px";
+const html5QrCode = new Html5Qrcode('reader');
 
-/*
-  SETTINGS FOR SMALL / LOW-RES QR CODES:
+// Show GPU status
+const gpuStatusEl = document.getElementById("gpuStatus"); 
+if (gpuStatusEl) gpuStatusEl.textContent = "GPU: checking…";
 
-  • qrbox: undefined     → entire frame examined (critical for tiny QR codes)
-  • disableFlip: true    → speeds up decode and stabilises sharpness
-  • willReadFrequently   → keeps camera buffer hot for small QR
-  • experimentalFeatures → force the newer barcode detector when supported
-*/
+// Try to detect GPU availability via WebGL
+function detectGPU() {
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    if (!gl) {
+      gpuStatusEl.textContent = "GPU: Not used";
+      return false;
+    }
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const gpuName = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "GPU detected";
+    gpuStatusEl.textContent = "GPU: Active (" + gpuName + ")";
+    return true;
+  } catch {
+    gpuStatusEl.textContent = "GPU: Not used";
+    return false;
+  }
+}
+detectGPU();
+
+document.getElementById("reader").style.minHeight = "260px";
+
+// --- MAXIMUM small-QR enhancements ---
 const qrConfig = {
-  fps: 10,
-  qrbox: undefined,   // analyse whole frame
+  fps: 12,
+  qrbox: undefined,
   disableFlip: true,
+  willReadFrequently: true,
   experimentalFeatures: {
-    useBarCodeDetectorIfSupported: true   // higher precision path
+    useBarCodeDetectorIfSupported: true
   },
   videoConstraints: {
     facingMode: "environment",
-    width: { ideal: 1920 },  // highest possible resolution
-    height: { ideal: 1080 }
+    width: { ideal: 2560 },   // PUSH HIGHER
+    height: { ideal: 1440 },
+    zoom: 5                   // Use digital zoom by default (helps tiny QR)
   }
 };
+
+// Choose telephoto lens when available
+function pickBestCamera(devices) {
+  const tele = devices.find(d =>
+    /tele|zoom/i.test(d.label) ||
+    d.label.toLowerCase().includes("back") && d.label.toLowerCase().includes("camera 2")
+  );
+  return tele ? { deviceId: { exact: tele.id } } : { facingMode: "environment" };
+}
 
 function onScanSuccess(decodedText) {
   if (!tickets.find(t => t.raw === decodedText)) {
@@ -236,21 +266,32 @@ function onScanSuccess(decodedText) {
   }
 }
 
+// Fetch cameras
 Html5Qrcode.getCameras()
   .then(devices => {
-    if (devices && devices.length) {
-      html5QrCode.start(
-        { facingMode: "environment" }, // camera selector
-        qrConfig,
-        onScanSuccess
-      ).catch(err => console.error("Camera start failed:", err));
-    } else {
+    if (!devices || !devices.length) {
       console.error("No cameras found");
+      return;
     }
+
+    // Select telephoto if available
+    const chosenCam = pickBestCamera(devices);
+
+    html5QrCode.start(
+      chosenCam,
+      qrConfig,
+      onScanSuccess,
+      error => {} // suppress spammy decode errors
+    )
+    .then(() => {
+      gpuStatusEl.textContent += " | QR scanner running";
+    })
+    .catch(err => console.error("Camera start failed:", err));
   })
   .catch(err => console.error("Camera detection error:", err));
 
-// File upload scanning remains same
+
+// File upload scanning unchanged
 document.getElementById('fileInput').addEventListener('change', e => {
   if (e.target.files.length === 0) return;
   const file = e.target.files[0];
